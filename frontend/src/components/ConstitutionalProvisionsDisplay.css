@@ -1,0 +1,157 @@
+/* Constitutional Provisions Display Styles */
+
+.provisions-container {
+  margin: 20px 0;
+  padding: 20px;
+  background: var(--color-beige);
+  border-radius: 12px;
+}
+
+.provisions-container h2 {
+  color: var(--color-dark);
+  margin-bottom: 10px;
+  font-size: 1.5em;
+}
+
+.provisions-container .description {
+  color: var(--color-brown);
+  font-size: 0.95em;
+  margin-bottom: 20px;
+}
+
+.provisions-container .no-data {
+  color: var(--color-brown);
+  font-style: italic;
+  text-align: center;
+  padding: 20px;
+}
+
+.provision-box {
+  margin-bottom: 20px;
+  padding: 20px;
+  background: white;
+  border-left: 5px solid var(--color-blue);
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.provision-box:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+}
+
+.provision-box.semantic {
+  border-left-color: #28a745;
+}
+
+.provision-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 15px;
+  gap: 15px;
+}
+
+.article-title {
+  color: var(--color-dark);
+  font-size: 1.2em;
+  margin: 0;
+  flex: 1;
+}
+
+.badges {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.method-badge {
+  background: var(--color-blue);
+  color: white;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 0.85em;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.provision-box.semantic .method-badge {
+  background: #28a745;
+}
+
+.score-badge {
+  background: #ffc107;
+  color: #000;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 0.85em;
+  font-weight: bold;
+  white-space: nowrap;
+}
+
+.matched-text {
+  margin: 15px 0;
+  padding: 12px;
+  background: var(--color-beige);
+  border-radius: 6px;
+}
+
+.matched-text strong {
+  color: var(--color-dark);
+  display: block;
+  margin-bottom: 8px;
+}
+
+.text-snippet {
+  color: var(--color-brown);
+  font-style: italic;
+  margin: 0;
+  line-height: 1.6;
+}
+
+.provision-details {
+  margin-top: 15px;
+  background: #f8f9fa;
+  padding: 15px;
+  border-radius: 6px;
+  border: 1px solid var(--color-brown);
+}
+
+.provision-details[open] {
+  background: #fff;
+}
+
+.provision-details summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--color-dark);
+  margin-bottom: 10px;
+  padding: 5px;
+  border-radius: 4px;
+  transition: background 0.2s;
+}
+
+.provision-details summary:hover {
+  background: var(--color-beige);
+}
+
+.constitution-text,
+.explanation-text,
+.context-text {
+  color: #495057;
+  line-height: 1.8;
+  margin-top: 10px;
+}
+
+.explanation-text {
+  font-size: 0.95em;
+  color: #2c3e50;
+}
+
+.source-doc {
+  margin-top: 10px;
+  color: var(--color-brown);
+  font-style: italic;
+  font-size: 0.9em;
+}

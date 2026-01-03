@@ -1,0 +1,16 @@
+<View>
+  <Header value="Legal Document NER Annotation"/>
+  
+  <Text name="text" value="$text"/>
+  
+  <Labels name="label" toName="text">
+    <Label value="CASE_NAME" background="#FF6B6B" hotkey="1"/>
+    <Label value="COURT" background="#4ECDC4" hotkey="2"/>
+    <Label value="JUDGE" background="#45B7D1" hotkey="3"/>
+    <Label value="STATUTE" background="#FFA07A" hotkey="4"/>
+    <Label value="ARTICLE" background="#98D8C8" hotkey="5"/>
+    <Label value="LEGAL_PRINCIPLE" background="#F7DC6F" hotkey="6"/>
+    <Label value="DATE" background="#BB8FCE" hotkey="7"/>
+    <Label value="CITATION" background="#85C1E2" hotkey="8"/>
+  </Labels>
+</View>
