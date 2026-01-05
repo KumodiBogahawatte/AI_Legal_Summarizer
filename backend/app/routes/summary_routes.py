@@ -47,7 +47,7 @@ def analyze_rights(document_id: int, db: Session = Depends(get_db)):
     }
 
 @router.post("/summarize/with-local-context")
-def summarize_document(document_id: int, db: Session = Depends(get_db)):
+def summarize_document(document_id: int, use_ai: bool = True, db: Session = Depends(get_db)):
     try:
         doc = db.query(LegalDocument).filter_by(id=document_id).first()
         if not doc:
@@ -67,24 +67,30 @@ def summarize_document(document_id: int, db: Session = Depends(get_db)):
                 "Please upload only Sri Lankan Law Reports (SLR) or New Law Reports (NLR) documents."
             )
 
+        # Use BART for better summaries (free, open-source)
+        if use_ai:
+            try:
+                from ..services.bart_summarizer import BARTLegalSummarizer
+                bart = BARTLegalSummarizer()
+                
+                summary = bart.summarize_legal_document(doc.cleaned_text, max_length=200, min_length=100)
+                keywords = bart.extract_key_points(doc.cleaned_text, num_points=7)
+                
+                print("✅ BART summary generated successfully")
+            except Exception as e:
+                print(f"⚠️ BART failed, falling back to basic summarizer: {e}")
+                # Fallback to existing summarizer
+                nlp_analyzer = NLPAnalyzer()
+                summary = nlp_analyzer.extractive_summary(doc.cleaned_text, n_sentences=5)
+                keywords = nlp_analyzer.extract_keywords(doc.cleaned_text)
+        else:
+            # Use existing NLP analyzer
+            nlp_analyzer = NLPAnalyzer()
+            summary = nlp_analyzer.extractive_summary(doc.cleaned_text, n_sentences=5)
+            keywords = nlp_analyzer.extract_keywords(doc.cleaned_text)
+
         # Initialize engines
-        nlp_analyzer = NLPAnalyzer()
         legal_engine = SriLankaLegalEngine()
-
-        # Test each step individually to find which one fails
-        try:
-            summary = nlp_analyzer.extractive_summary(doc.cleaned_text or "", n_sentences=5)
-            print("Summary generated successfully")
-        except Exception as e:
-            print(f"Summary generation failed: {str(e)}")
-            raise
-
-        try:
-            multilingual_terms = legal_engine.detect_multilingual_terms(doc.cleaned_text or "")
-            print("Multilingual terms detected successfully")
-        except Exception as e:
-            print(f"Multilingual terms detection failed: {str(e)}")
-            raise
 
         # NEW: Detect constitutional rights using the legal engine
         try:
@@ -127,10 +133,11 @@ def summarize_document(document_id: int, db: Session = Depends(get_db)):
         return {
             "document_id": document_id,
             "summary": summary,
-            "keywords": nlp_analyzer.extract_keywords(doc.cleaned_text or ""),
-            "multilingual_legal_terms": multilingual_terms,
-            "fundamental_rights": fundamental_rights,  # Filtered to Articles 10-18 only
-            "constitutional_provisions": constitutional_provisions  # All constitutional articles
+            "keywords": keywords,
+            "multilingual_legal_terms": legal_engine.detect_multilingual_terms(doc.cleaned_text),
+            "fundamental_rights": fundamental_rights,
+            "constitutional_provisions": constitutional_provisions,
+            "summary_model": "facebook/bart-large-cnn" if use_ai else "extractive"
         }
     except Exception as e:
         print(f"Summary error: {str(e)}")
@@ -672,9 +679,11 @@ def get_similar_cases(
         return {
             'document_id': document_id,
             'source_document': {
-                'title': doc.file_name,  # Using file_name as title
+                'id': doc.id,
+                'title': doc.file_name,
                 'court': doc.court,
-                'year': doc.year
+                'year': doc.year,
+                'case_number': doc.case_number
             },
             'similar_cases_count': len(similar_cases),
             'similar_cases': similar_cases
@@ -687,49 +696,284 @@ def get_similar_cases(
         raise HTTPException(500, f"Failed to find similar cases: {str(e)}")
 
 
-@router.post("/find-precedents")
-def find_precedents(
-    query: PrecedentQuery,
-    db: Session = Depends(get_db)
-):
+@router.get("/case/{document_id}")
+def get_case_details(document_id: int, db: Session = Depends(get_db)):
     """
-    Find precedents based on free text query.
-    
-    Request Body:
-        - query_text: Text to search for
-        - top_k: Number of results (default: 5)
-        - court_filter: Filter by court name (optional)
-        - year_from: Minimum year (optional)
-        - year_to: Maximum year (optional)
-    
-    Returns:
-        List of matching cases with similarity scores
+    Get full details of a specific case with analysis.
     """
     try:
-        if not query.query_text or not query.query_text.strip():
-            raise HTTPException(400, "Query text cannot be empty")
+        # Get document
+        doc = db.query(LegalDocument).filter_by(id=document_id).first()
+        if not doc:
+            raise HTTPException(404, f"Case {document_id} not found")
         
-        # Get precedent matcher
-        matcher = get_precedent_matcher()
+        # Get or generate entities
+        try:
+            from ..models.legal_entity_model import LegalEntity
+            entities = db.query(LegalEntity).filter_by(document_id=document_id).all()
+            
+            # If no entities found, extract them
+            if not entities and doc.cleaned_text:
+                nlp_analyzer = NLPAnalyzer()
+                extracted_entities = nlp_analyzer.extract_legal_entities(doc.cleaned_text)
+                
+                # Save entities to database
+                for entity_type, entity_list in extracted_entities.items():
+                    for entity_data in entity_list:
+                        new_entity = LegalEntity(
+                            document_id=document_id,
+                            entity_text=entity_data['text'],
+                            entity_type=entity_type,
+                            start_pos=entity_data.get('start', 0),
+                            end_pos=entity_data.get('end', 0),
+                            context=entity_data.get('context', '')
+                        )
+                        db.add(new_entity)
+                db.commit()
+                
+                # Refresh entities list
+                entities = db.query(LegalEntity).filter_by(document_id=document_id).all()
+            
+            entities_by_type = {}
+            for entity in entities:
+                if entity.entity_type not in entities_by_type:
+                    entities_by_type[entity.entity_type] = []
+                entities_by_type[entity.entity_type].append({
+                    "text": entity.entity_text,
+                    "context": entity.context if hasattr(entity, 'context') else None
+                })
+        except Exception as e:
+            print(f"Could not load/generate entities: {e}")
+            entities_by_type = {}
+            entities = []
         
-        # Find precedents
-        precedents = matcher.find_precedents_by_text(
-            query_text=query.query_text,
-            top_k=query.top_k,
-            court_filter=query.court_filter,
-            year_from=query.year_from,
-            year_to=query.year_to,
-            db=db
-        )
+        # Get or generate rights
+        try:
+            from ..models.rights_model import DetectedRight
+            rights = db.query(DetectedRight).filter_by(document_id=document_id).all()
+            
+            # If no rights found, detect them
+            if not rights and doc.cleaned_text:
+                legal_engine = SriLankaLegalEngine()
+                detected_rights = legal_engine.analyze_rights(
+                    db=db,
+                    document_id=document_id,
+                    text=doc.cleaned_text,
+                    language="en"
+                )
+                
+                # Refresh rights list
+                rights = db.query(DetectedRight).filter_by(document_id=document_id).all()
+            
+            rights_list = [{
+                "article_number": r.article_number,
+                "matched_text": r.matched_text,
+                "explanation_en": r.explanation_en
+            } for r in rights]
+        except Exception as e:
+            print(f"Could not load/generate rights: {e}")
+            rights_list = []
+            rights = []
+        
+        # Get or generate citations
+        try:
+            from ..models.citation_model import SLCitation
+            citations = db.query(SLCitation).filter_by(document_id=document_id).all()
+            
+            # If no citations found, extract them
+            if not citations and doc.cleaned_text:
+                legal_engine = SriLankaLegalEngine()
+                legal_engine.extract_citations(
+                    db=db,
+                    doc_id=document_id,
+                    text=doc.cleaned_text
+                )
+                
+                # Refresh citations list
+                citations = db.query(SLCitation).filter_by(document_id=document_id).all()
+            
+            citations_list = [c.citation_text for c in citations]
+        except Exception as e:
+            print(f"Could not load/generate citations: {e}")
+            citations_list = []
+        
+        # Build response
+        response = {
+            "document_id": doc.id,
+            "file_name": doc.file_name,
+            "court": doc.court,
+            "year": doc.year,
+            "case_number": doc.case_number,
+            "text": {
+                "cleaned": doc.cleaned_text[:5000] if doc.cleaned_text else None,
+                "full_length": len(doc.cleaned_text) if doc.cleaned_text else 0
+            },
+            "metadata": {
+                "has_embedding": doc.embedding is not None and len(doc.embedding) > 0 if doc.embedding else False,
+                "embedding_dimension": len(doc.embedding) if doc.embedding else 0
+            },
+            "analysis": {
+                "rights_detected": len(rights_list),
+                "citations_found": len(citations_list),
+                "entities_extracted": len(entities)
+            },
+            "rights": rights_list[:10],
+            "citations": citations_list[:10],
+            "entities": entities_by_type
+        }
+        
+        if hasattr(doc, 'uploaded_at') and doc.uploaded_at:
+            response["uploaded_at"] = doc.uploaded_at.isoformat()
+        
+        return response
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error getting case details: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(500, f"Failed to get case details: {str(e)}")
+
+
+@router.get("/case/{document_id}/full-text")
+def get_case_full_text(document_id: int, db: Session = Depends(get_db)):
+    """
+    Get the complete text of a case.
+    Separate endpoint to avoid loading large text in list views.
+    """
+    try:
+        doc = db.query(LegalDocument).filter_by(id=document_id).first()
+        if not doc:
+            raise HTTPException(404, f"Case {document_id} not found")
         
         return {
-            'query': query.query_text,
-            'results_count': len(precedents),
-            'precedents': precedents
+            "document_id": doc.id,
+            "file_name": doc.file_name,
+            "cleaned_text": doc.cleaned_text,
+            "raw_text": doc.raw_text,
+            "text_length": len(doc.cleaned_text or doc.raw_text or "")
         }
         
     except HTTPException:
         raise
     except Exception as e:
-        print(f"Error finding precedents: {str(e)}")
-        raise HTTPException(500, f"Failed to find precedents: {str(e)}")
+        print(f"Error getting full text: {str(e)}")
+        raise HTTPException(500, f"Failed to get full text: {str(e)}")
+
+
+@router.post("/compare-documents")
+def compare_documents(
+    source_document_id: int,
+    target_document_id: int,
+    threshold: float = 0.5,
+    db: Session = Depends(get_db)
+):
+    """
+    Compare two documents and return matching sentences
+    
+    Args:
+        source_document_id: The uploaded document
+        target_document_id: The case to compare against
+        threshold: Minimum similarity score (0-1)
+    
+    Returns:
+        Matching sentences with similarity scores and highlighted text
+    """
+    try:
+        from ..services.text_similarity_service import get_similarity_service
+        
+        # Get documents
+        source_doc = db.query(LegalDocument).filter_by(id=source_document_id).first()
+        target_doc = db.query(LegalDocument).filter_by(id=target_document_id).first()
+        
+        if not source_doc or not target_doc:
+            raise HTTPException(404, "Document not found")
+        
+        source_text = source_doc.cleaned_text or source_doc.raw_text
+        target_text = target_doc.cleaned_text or target_doc.raw_text
+        
+        if not source_text or not target_text:
+            raise HTTPException(400, "Documents have no text content")
+        
+        # Compare documents
+        similarity_service = get_similarity_service()
+        comparison = similarity_service.compare_documents(
+            source_text,
+            target_text,
+            threshold
+        )
+        
+        # Generate highlighted text
+        highlighted_text = similarity_service.highlight_matching_text(
+            target_text,
+            comparison['highlighted_sentences']
+        )
+        
+        return {
+            'source_document_id': source_document_id,
+            'target_document_id': target_document_id,
+            'comparison': comparison,
+            'highlighted_text': highlighted_text
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Document comparison error: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(500, f"Comparison failed: {str(e)}")
+
+
+@router.get("/case-brief/{document_id}")
+def generate_case_brief(document_id: int, db: Session = Depends(get_db)):
+    """
+    Generate structured legal case brief suitable for law students and research
+    
+    Returns:
+        - Case citation (name, court, year)
+        - Executive summary (100-150 words)
+        - Facts
+        - Issues
+        - Holding/Decision
+        - Reasoning
+        - Final Order
+        - Ratio Decidendi (2-4 bullet points)
+        - Procedural/Evidentiary Principles
+    """
+    try:
+        from ..services.case_brief_generator import CaseBriefGenerator
+        
+        # Get document
+        doc = db.query(LegalDocument).filter_by(id=document_id).first()
+        if not doc:
+            raise HTTPException(404, "Document not found")
+        
+        text = doc.cleaned_text or doc.raw_text
+        if not text:
+            raise HTTPException(400, "Document has no text content")
+        
+        # Prepare metadata
+        metadata = {
+            'court': doc.court,
+            'year': doc.year,
+            'case_number': doc.case_number
+        }
+        
+        # Generate case brief
+        brief = CaseBriefGenerator.generate_case_brief(text, metadata)
+        
+        return {
+            'document_id': document_id,
+            'file_name': doc.file_name,
+            'case_brief': brief
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Case brief generation error: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(500, f"Brief generation failed: {str(e)}")

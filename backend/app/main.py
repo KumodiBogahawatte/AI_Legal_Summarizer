@@ -38,8 +38,21 @@ from app.db import Base, engine, init_db
 
 @app.on_event("startup")
 async def startup_event():
+    """Initialize services on startup"""
+    print("🚀 Starting application...")
+    
     init_db()
     print("✅ Application started successfully!")
+    
+    # Pre-load BART model to avoid first-upload timeout
+    try:
+        print("📥 Pre-loading BART summarization model...")
+        from app.services.bart_summarizer import BARTLegalSummarizer
+        _ = BARTLegalSummarizer()  # This triggers model download
+        print("✅ BART model ready")
+    except Exception as e:
+        print(f"⚠️ BART model not loaded: {e}")
+        print("   Summarization will fall back to extractive method")
 
 @app.get("/")
 def root():

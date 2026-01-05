@@ -101,7 +101,23 @@ class DocumentProcessor:
         score = 0
         matched_indicators = []
         
-        # STRONG indicators (must have at least one)
+        # STRONG indicators - Check for party names format (common in NLR)
+        # Format: "NAME v. NAME" or "NAME vs NAME" or "NAME et al. v. NAME"
+        party_pattern = r'\b[A-Z][A-Za-z\s]+\s+(?:v\.|vs\.|versus)\s+[A-Z][A-Za-z\s]+'
+        if re.search(party_pattern, text[:1000]):  # Check first 1000 chars
+            score += 15
+            matched_indicators.append("Party name format (v./vs.) (+15)")
+        
+        # Check for "et al." which is common in NLR
+        if re.search(r'\bet\s+al\.', text_upper[:1000]):
+            score += 10
+            matched_indicators.append("'et al.' found (+10)")
+        
+        # Check for "Re" citation format (e.g., "Re 38. Chanda.")
+        if re.search(r'\bRe\s+\d+\.', text[:500]):
+            score += 20
+            matched_indicators.append("'Re' citation format (+20)")
+        
         # Check for Sri Lankan Law Reports (SLR) indicators
         slr_patterns = [
             r'\bSLR\b',
@@ -111,10 +127,11 @@ class DocumentProcessor:
         # Check for New Law Reports (NLR) indicators
         nlr_patterns = [
             r'\bNLR\b',
-            r'\bNEW\s+LAW\s+REPORTS?\b'
+            r'\bNEW\s+LAW\s+REPORTS?\b',
+            r'\bCEYLON\s+LAW\s+REPORTS?\b',  # Older term for SL
         ]
         
-        # Check for case citation patterns (e.g., "2015 1 SLR 123", "2020 NLR 45")
+        # Check for case citation patterns
         citation_patterns = [
             r'\d{4}\s+\d+\s+SLR\s+\d+',
             r'\d{4}\s+NLR\s+\d+',
@@ -128,41 +145,54 @@ class DocumentProcessor:
         strong_patterns = slr_patterns + nlr_patterns + citation_patterns
         for pattern in strong_patterns:
             if re.search(pattern, text_upper):
-                score += 50
-                matched_indicators.append(f"SLR/NLR citation (+50)")
+                score += 30
+                matched_indicators.append(f"SLR/NLR citation (+30)")
                 break
         
-        # Check for Sri Lankan courts (MUST have specific Sri Lanka court)
+        # Check for Sri Lankan/Ceylon courts
         court_patterns = [
-            r'\bSUPREME\s+COURT\s+OF\s+SRI\s+LAN?KA\b',
-            r'\bCOURT\s+OF\s+APPEAL\s+OF\s+SRI\s+LAN?KA\b',
-            r'\bHIGH\s+COURT\s+OF\s+SRI\s+LAN?KA\b',
-            r'\bDISTRICT\s+COURT.*SRI\s+LAN?KA\b',
-            r'\bMAGISTRATE.*COURT.*SRI\s+LAN?KA\b',
+            r'\bSUPREME\s+COURT\b',
+            r'\bCOURT\s+OF\s+APPEAL\b',
+            r'\bHIGH\s+COURT\b',
+            r'\bDISTRICT\s+COURT\b',
+            r'\bMAGISTRATE.*COURT\b',
+            r'\bPRIVY\s+COUNCIL\b',  # Historical appeals
         ]
         
         for pattern in court_patterns:
             if re.search(pattern, text_upper):
-                score += 30
-                matched_indicators.append(f"Sri Lankan court (+30)")
+                score += 15
+                matched_indicators.append(f"Court reference (+15)")
                 break
         
-        # Check for legal case structure keywords (must have multiple)
+        # Check for company/entity terms common in NLR
+        entity_terms = [
+            (r'\bCOMPANY\b', 5),
+            (r'\bLIMITED\b', 5),
+            (r'\bCORPORATION\b', 5),
+            (r'\bNAVIGATION\b', 5),
+            (r'\bSTEAM\b', 5),
+        ]
+        
+        for pattern, points in entity_terms:
+            if re.search(pattern, text_upper):
+                score += points
+                matched_indicators.append(f"Entity term ({pattern}: +{points})")
+        
+        # Check for case structure keywords
         case_structure_terms = [
-            (r'\bPETITIONER\b', 10),
-            (r'\bRESPONDENT\b', 10),
-            (r'\bAPPELLANT\b', 10),
-            (r'\bPLAINTIFF\b', 10),
-            (r'\bDEFENDANT\b', 10),
-            (r'\bACCUSED\b', 10),
+            (r'\bPETITIONER\b', 5),
+            (r'\bRESPONDENT\b', 5),
+            (r'\bAPPELLANT\b', 5),
+            (r'\bPLAINTIFF\b', 5),
+            (r'\bDEFENDANT\b', 5),
+            (r'\bACCUSED\b', 5),
             (r'\bJUDGMENT\b', 5),
             (r'\bJUDGEMENT\b', 5),
             (r'\bRULING\b', 5),
-            (r'\bCONVICTION\b', 5),
             (r'\bAPPEAL\b', 5),
-            (r'\bS\.\s*C\.\s*APPLICATION\b', 15),
-            (r'\bC\.\s*A\.\s*APPLICATION\b', 15),
-            (r'\bH\.\?C\.\s*APPLICATION\b', 15),
+            (r'\bDAMAGES\b', 5),
+            (r'\bLIABILITY\b', 5),
         ]
         
         for pattern, points in case_structure_terms:
@@ -170,16 +200,13 @@ class DocumentProcessor:
                 score += points
                 matched_indicators.append(f"Case structure term ({pattern}: +{points})")
         
-        # Check for legal citations and references
+        # Check for legal references
         legal_references = [
-            (r'\bORDINANCE\s+NO\.\s+\d+', 10),
-            (r'\bACT\s+NO\.\s+\d+', 10),
+            (r'\bORDINANCE\b', 5),
+            (r'\bACT\b', 5),
             (r'\bSECTION\s+\d+', 5),
             (r'\bCHAPTER\s+\w+', 5),
-            (r'\bP\.\s*C[,\.]', 10),  # Police Court
-            (r'\bD\.\s*C[,\.]', 10),  # District Court
-            (r'\bCRIMINAL\s+PROCEDURE\s+CODE', 10),
-            (r'\bCIVIL\s+PROCEDURE\s+CODE', 10),
+            (r'\bRULE\s+\d+', 5),
         ]
         
         for pattern, points in legal_references:
@@ -187,21 +214,17 @@ class DocumentProcessor:
                 score += points
                 matched_indicators.append(f"Legal reference ({pattern}: +{points})")
         
-        # Must have score of at least 20 to pass validation (lowered from 30)
-        # This is more lenient for various types of Sri Lankan legal documents
-        # Minimum requirements:
-        # - At least some legal structure terms (20 points) OR
-        # - Court name (30 points) OR  
-        # - SLR/NLR citation (50 points)
+        # LOWERED THRESHOLD: 15 points (was 20)
+        # This accommodates older NLR formats which may not have all modern indicators
         
-        print(f"Document validation score: {score} (minimum: 20)")
+        print(f"Document validation score: {score} (minimum: 15)")
         print(f"Matched indicators: {matched_indicators}")
         
-        if score < 20:
-            print(f"VALIDATION FAILED: Score {score} is below threshold of 20")
+        if score < 15:
+            print(f"VALIDATION FAILED: Score {score} is below threshold of 15")
             print(f"Text preview (first 500 chars): {text[:500]}")
         
-        return score >= 20
+        return score >= 15
 
     @staticmethod
     def segment_into_paragraphs(text: str) -> list:

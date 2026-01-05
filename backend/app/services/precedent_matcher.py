@@ -140,11 +140,12 @@ class PrecedentMatcher:
             else:
                 source_embedding = np.array(source_doc.embedding)
             
-            # Get all other documents with embeddings
+            # Get all other documents with embeddings, excluding source and duplicates
             candidate_docs = db.query(LegalDocument).filter(
                 and_(
                     LegalDocument.id != document_id,
-                    LegalDocument.embedding.isnot(None)
+                    LegalDocument.embedding.isnot(None),
+                    LegalDocument.file_name != source_doc.file_name  # Exclude same filename
                 )
             ).all()
             
@@ -154,16 +155,24 @@ class PrecedentMatcher:
             
             # Calculate similarities
             similar_cases = []
+            seen_files = set()  # Track unique files
             
             for candidate in candidate_docs:
                 try:
+                    # Skip if we've already seen this file
+                    if candidate.file_name in seen_files:
+                        continue
+                    
                     candidate_embedding = np.array(candidate.embedding)
                     
-                    # Calculate base similarity
+                    # Calculate base similarity (returns value between -1 and 1, typically 0 to 1)
                     base_similarity = self.embedding_service.cosine_similarity(
                         source_embedding,
                         candidate_embedding
                     )
+                    
+                    # Ensure similarity is in valid range [0, 1]
+                    base_similarity = max(0.0, min(1.0, base_similarity))
                     
                     # Skip if below threshold
                     if base_similarity < min_similarity:
@@ -171,10 +180,23 @@ class PrecedentMatcher:
                     
                     # Calculate year difference if possible
                     year_diff = None
-                    if source_doc.year and candidate.year:
-                        year_diff = abs(source_doc.year - candidate.year)
+                    recency_percentage = None
                     
-                    # Calculate weighted similarity
+                    if source_doc.year and candidate.year:
+                        try:
+                            # Handle both int and string years
+                            source_year = int(str(source_doc.year)[:4])  # Take first 4 digits
+                            candidate_year = int(str(candidate.year)[:4])
+                            year_diff = abs(source_year - candidate_year)
+                            
+                            # Calculate recency as percentage (0 years = 100%, decreases by 2% per year)
+                            recency_percentage = max(0, 100 - (year_diff * 2))
+                        except (ValueError, TypeError) as e:
+                            logger.warning(f"Invalid year data for document {candidate.id}: {e}")
+                            year_diff = None
+                            recency_percentage = None
+                    
+                    # Calculate weighted similarity (still in 0-1 range)
                     weighted_similarity = self._calculate_weighted_similarity(
                         base_similarity,
                         source_doc.court or "",
@@ -182,18 +204,24 @@ class PrecedentMatcher:
                         year_diff
                     )
                     
+                    # Get court weight
+                    court_weight_raw = self._get_court_weight(candidate.court or "")
+                    
                     similar_cases.append({
                         'document_id': candidate.id,
                         'file_name': candidate.file_name,
-                        'title': candidate.file_name,  # Using file_name as title
+                        'title': candidate.file_name,
                         'court': candidate.court,
-                        'year': candidate.year,
+                        'year': str(candidate.year) if candidate.year else None,
                         'case_number': candidate.case_number,
-                        'similarity_score': round(base_similarity, 4),
-                        'weighted_score': round(weighted_similarity, 4),
-                        'court_weight': self._get_court_weight(candidate.court or ""),
+                        'similarity_score': round(base_similarity * 100, 1),  # Convert to percentage for display
+                        'weighted_score': round(weighted_similarity * 100, 1),  # Convert to percentage for display
+                        'court_weight': round(court_weight_raw * 100, 1),  # Convert to percentage for display
+                        'recency': recency_percentage if recency_percentage is not None else None,  # Already a percentage or None
                         'binding': self._is_binding(source_doc.court, candidate.court)
                     })
+                    
+                    seen_files.add(candidate.file_name)
                 
                 except Exception as e:
                     logger.error(f"Error processing candidate {candidate.id}: {str(e)}")

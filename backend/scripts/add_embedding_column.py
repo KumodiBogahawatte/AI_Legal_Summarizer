@@ -23,16 +23,16 @@ def add_embedding_column():
     print("=" * 70)
     
     try:
-        with engine.connect() as conn:
+        with engine.begin() as conn:
             # Add column if it doesn't exist
             conn.execute(sqlalchemy.text(
                 "ALTER TABLE legal_documents ADD COLUMN IF NOT EXISTS embedding JSON"
             ))
-            conn.commit()
             
             print("✅ Embedding column added successfully!")
             
-            # Verify column exists
+        # Verify column exists in a separate connection
+        with engine.connect() as conn:
             result = conn.execute(sqlalchemy.text("""
                 SELECT column_name, data_type 
                 FROM information_schema.columns 
