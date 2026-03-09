@@ -10,12 +10,18 @@ ENV/
 pip-wheel-metadata/
 *.egg-info/
 
+# Frontend
+Frontend-main/
+
 # OS
 .DS_Store
 Thumbs.db
 
 # VS Code
 .vscode/
+
+# Cursor
+.cursor/
 
 # Data
 data/raw_documents/*
@@ -45,7 +51,10 @@ backups/
 backend/alembic/versions/*.py
 !backend/alembic/versions/.gitkeep
 
-# Uploaded documents
+# Uploaded 
+raw_documents/
+*.db-shm
+*.db-wal
 backend/uploaded_docs/*
 uploaded_docs/*
 
@@ -55,3 +64,4 @@ backend/models/document_classifier/*
 backend/models/summarization_model/*
 backend/models/rights_classifier/*
 !backend/models/.gitkeep
+node_modules
