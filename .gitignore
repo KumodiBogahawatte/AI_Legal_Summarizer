@@ -1,0 +1,67 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+env/
+ENV/
+pip-wheel-metadata/
+*.egg-info/
+
+# Frontend
+Frontend-main/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# VS Code
+.vscode/
+
+# Cursor
+.cursor/
+
+# Data
+data/raw_documents/*
+data/processed/*
+!data/sri_lanka_legal_corpus/*.json
+
+# Logs
+*.log
+
+# Node modules
+frontend/node_modules/
+frontend/dist/
+
+# SQLite DB
+*.db
+
+# Environment variables (sensitive)
+backend/.env
+.env
+
+# PostgreSQL backups
+backend/backups/
+backups/
+*.sql
+
+# Alembic
+backend/alembic/versions/*.py
+!backend/alembic/versions/.gitkeep
+
+# Uploaded 
+raw_documents/
+*.db-shm
+*.db-wal
+backend/uploaded_docs/*
+uploaded_docs/*
+
+# ML Models (large files)
+backend/models/legal_ner_model/*
+backend/models/document_classifier/*
+backend/models/summarization_model/*
+backend/models/rights_classifier/*
+!backend/models/.gitkeep
+node_modules

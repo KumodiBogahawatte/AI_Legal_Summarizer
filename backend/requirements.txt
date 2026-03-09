@@ -1,0 +1,36 @@
+fastapi
+uvicorn[standard]
+python-multipart
+pdfplumber
+pytesseract
+Pillow
+pdfminer.six
+scikit-learn
+nltk
+sqlalchemy
+alembic
+python-dotenv
+psycopg2-binary
+pgvector
+email-validator
+spacy>=3.0.0
+transformers>=4.30.0
+torch>=2.0.0
+accelerate
+sentence-transformers>=2.2.0
+
+faiss-cpu
+openai
+
+# RAG v2 additions
+celery[redis]>=5.3.0
+redis>=5.0.0
+huggingface-hub>=0.20.0
+numpy>=1.24.0
+
+# Elasticsearch integration
+elasticsearch>=8.0.0
+
+# Required for FLAN-T5 text2text-generation pipeline
+sentencepiece
+protobuf

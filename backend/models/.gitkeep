@@ -1,0 +1,17 @@
+# ML Models Directory
+
+This directory will contain trained machine learning models:
+
+- `legal_ner_model/` - Custom Named Entity Recognition model for legal entities
+- `document_classifier/` - Document structure classification model
+- `summarization_model/` - Fine-tuned summarization model (BART/T5)
+- `rights_classifier/` - Constitutional rights violation classifier
+
+Models are excluded from git due to large file sizes.
+
+For model training, see:
+
+- `notebooks/train_legal_ner.ipynb`
+- `notebooks/train_document_classifier.ipynb`
+- `notebooks/train_summarization_model.ipynb`
+- `notebooks/train_rights_classifier.ipynb`
