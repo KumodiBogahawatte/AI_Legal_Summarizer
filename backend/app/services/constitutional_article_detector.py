@@ -23,10 +23,10 @@ FR_ARTICLE_EXPLANATIONS = {
     "14A": "Right to Access Information: (1) Every citizen shall have the right of access to any information as provided for by law, being information that is required for the exercise or protection of a citizen's right. (2) No restrictions shall be placed on the right declared and recognized by this Article, other than such restrictions as may be prescribed by law in the interests of national security, the prevention of crime or the protection of public health or morality, or for the purpose of protecting the privacy of other persons.",
     "15": "Restrictions on Fundamental Rights: The exercise and operation of the fundamental rights declared and recognized by Articles 12(1), 13 and 14 shall be subject to such restrictions as may be prescribed by law in the interests of national security, public order and the protection of public health or morality, or for the purpose of securing due recognition and respect for the rights and freedoms of others, or of meeting the just requirements of the general welfare of a democratic society.",
     "16": "Existing Written Law and Unwritten Law: (1) All existing written law and unwritten law shall, to the extent that they are inconsistent with the provisions of this Chapter, be and shall be deemed to have been amended or repealed on the commencement of the Constitution and thereafter continue in force as so amended and such amendment or repeal shall be in addition to any amendment or repeal effected by any other provision of the Constitution.",
-    "17": "Duties of Every Person: Every person shall be subject to such duties as are determined by law. Such duties shall include respect for the national flag and the national anthem and such other duties as tend to uphold and strengthen national solidarity."
+    "17": "Remedy for the Infringement of Fundamental Rights by Executive Action: Every person shall be entitled to apply to the Supreme Court, as provided by Article 126, in respect of the infringement or imminent infringement, by executive or administrative action, of a fundamental right to which such person is entitled under the provisions of this Chapter."
 }
 
-BASE = Path(__file__).resolve().parents[3]
+BASE = Path(__file__).resolve().parents[3]  # project root
 DATA_DIR = BASE / "data" / "sri_lanka_legal_corpus"
 
 PROCESSED_CONSTITUTIONS_PATH = DATA_DIR / "processed_constitutions.json"
@@ -36,7 +36,6 @@ FUNDAMENTAL_RIGHTS_ARTICLES_PATH = DATA_DIR / "fundamental_rights_articles.json"
 # Load resources
 def _load_json(path: Path):
     if not path.exists():
-        print(f"Warning: File not found - {path}")
         return {}
     try:
         with open(path, "r", encoding="utf-8") as f:
@@ -49,7 +48,6 @@ def _load_json(path: Path):
 
 CONSTITUTIONS = _load_json(PROCESSED_CONSTITUTIONS_PATH)
 CONSTITUTION_ARTICLES = _load_json(CONSTITUTION_ARTICLES_PATH)
-FUNDAMENTAL_RIGHTS_ARTICLES = _load_json(FUNDAMENTAL_RIGHTS_ARTICLES_PATH)
 FUNDAMENTAL_RIGHTS_ARTICLES = _load_json(FUNDAMENTAL_RIGHTS_ARTICLES_PATH)
 
 # Build comprehensive sentence corpus from all constitution documents
@@ -69,6 +67,33 @@ for doc_name, doc_data in CONSTITUTIONS.items():
                 })
 
 print(f"Built corpus with {len(CONSTITUTIONAL_SENTENCES)} constitutional sentences")
+
+# Build index: article number -> exact text from processed_constitutions.json (100% source of truth)
+# So we only show provisions that exist in the constitution and display the real text.
+ARTICLE_EXTRACT_IN_CONST = re.compile(
+    r'\bArticle\s+(\d+[A-Z]?)(?!\d)|\bArt\.\s+(\d+[A-Z]?)(?!\d)',
+    re.IGNORECASE
+)
+PROCESSED_ARTICLE_TO_PROVISIONS = {}  # article_num -> [ {"document": str, "text": str}, ... ]
+
+for doc_name, doc_data in CONSTITUTIONS.items():
+    if not isinstance(doc_data, dict) or "sentences" not in doc_data:
+        continue
+    for sent in doc_data["sentences"]:
+        if not sent or len(sent.strip()) < 30:
+            continue
+        for m in ARTICLE_EXTRACT_IN_CONST.finditer(sent):
+            art = (m.group(1) or m.group(2) or "").strip()
+            if not art:
+                continue
+            if art not in PROCESSED_ARTICLE_TO_PROVISIONS:
+                PROCESSED_ARTICLE_TO_PROVISIONS[art] = []
+            # Avoid duplicate same text
+            entry = {"document": doc_name, "text": sent.strip()}
+            if entry["text"] not in (e["text"] for e in PROCESSED_ARTICLE_TO_PROVISIONS[art]):
+                PROCESSED_ARTICLE_TO_PROVISIONS[art].append(entry)
+
+print(f"Indexed {len(PROCESSED_ARTICLE_TO_PROVISIONS)} articles from processed_constitutions.json")
 
 # Build TF-IDF vectorizer for semantic matching
 TFIDF_VECTORIZER = None
@@ -96,10 +121,59 @@ ARTICLE_PATTERNS = [
 class ConstitutionalArticleDetector:
     """
     Detects references to constitutional articles and provisions in legal text.
+    Uses processed_constitutions.json as the single source of truth: only provisions
+    that appear there are shown, with exact text from the constitution.
     """
     
     def __init__(self, semantic_threshold: float = 0.70):
         self.semantic_threshold = semantic_threshold  # Increased to 0.70 to reduce false positives
+
+    def get_provision_from_processed_constitutions(self, article_num: str) -> List[Dict[str, str]]:
+        """
+        Return constitution provision text for the given article.
+
+        Behaviour:
+        - For Fundamental Rights articles (10–18, 14A): prefer the canonical
+          Chapter III text (via FR_ARTICLE_EXPLANATIONS / FUNDAMENTAL_RIGHTS_ARTICLES),
+          so we never pick up historical/non-constitutional materials (e.g. Soulbury Report).
+        - For all other articles: use processed_constitutions.json, but filter out
+          obviously non-constitutional documents such as the Soulbury Commission.
+        """
+        if not article_num:
+            return []
+        art = str(article_num).strip()
+        # Normalize 14A etc.
+        base = "".join(c for c in art if c.isdigit() or c.upper() == "A")
+        if not base:
+            return []
+
+        # 1. Fundamental Rights override (Articles 10–18, 14A) – single, clean text block
+        fr_keys = {"10", "11", "12", "13", "14", "14A", "15", "16", "17", "18"}
+        if base in fr_keys:
+            explanation = self._get_article_explanation(art) or self._get_article_explanation(base)
+            if isinstance(explanation, dict) and explanation.get("text"):
+                return [
+                    {
+                        "document": "Sri Lanka Constitution 1978 - Chapter III",
+                        "text": explanation["text"],
+                    }
+                ]
+
+        # 2. Fallback: use processed_constitutions.json index, but drop non-constitution docs
+        out = PROCESSED_ARTICLE_TO_PROVISIONS.get(art) or PROCESSED_ARTICLE_TO_PROVISIONS.get(base)
+        if not out and art.endswith("A") and art[:-1].isdigit():
+            out = PROCESSED_ARTICLE_TO_PROVISIONS.get(art[:-1])
+
+        if not out:
+            return []
+
+        # Filter out clearly non-constitutional sources (e.g. Soulbury Commission report)
+        filtered = [
+            entry
+            for entry in out
+            if "Soulbury" not in entry.get("document", "")
+        ]
+        return filtered or []
     
     def _is_constitutional_context(self, context: str, article_num: str) -> bool:
         """Check if the article mention is in a constitutional context, not a false positive."""
@@ -185,16 +259,19 @@ class ConstitutionalArticleDetector:
                     continue
                 
                 explanation = self._get_article_explanation(article_num)
+                provision_list = self.get_provision_from_processed_constitutions(article_num)
                 mention = {
                     "article": article_num,
                     "matched_text": match.group(0),
                     "context": context,
                     "method": "explicit_mention",
                     "score": 1.0,
-                    "article_title": explanation['title'] if explanation else f"Article {article_num}"
+                    "article_title": explanation['title'] if explanation else f"Article {article_num}",
+                    "constitution_provision_text": [p["text"] for p in provision_list] if provision_list else [],
+                    "constitution_source_documents": list({p["document"] for p in provision_list}) if provision_list else [],
                 }
                 if explanation:
-                    mention["explanation"] = explanation['text']
+                    mention["explanation"] = explanation.get("text", explanation["title"]) if isinstance(explanation, dict) else str(explanation)
                 mentions.append(mention)
         
         return mentions
@@ -242,17 +319,20 @@ class ConstitutionalArticleDetector:
                         article_num = self._extract_article_from_sentence(const_sent)
                         
                         explanation = self._get_article_explanation(article_num) if article_num else None
-                        
+                        provision_list = self.get_provision_from_processed_constitutions(article_num) if article_num else []
                         result = {
                             "matched_text": sent,
                             "constitutional_provision": const_sent[:300] + "..." if len(const_sent) > 300 else const_sent,
                             "document": metadata["document"],
                             "article": article_num or "Unknown",
                             "method": "semantic",
-                            "score": score
+                            "score": score,
+                            "constitution_provision_text": [p["text"] for p in provision_list] if provision_list else [],
+                            "constitution_source_documents": list({p["document"] for p in provision_list}) if provision_list else [],
                         }
                         if explanation:
-                            result["explanation"] = explanation
+                            result["explanation"] = explanation.get("text", explanation.get("title", "")) if isinstance(explanation, dict) else str(explanation)
+                            result["article_title"] = explanation.get("title", f"Article {article_num}") if isinstance(explanation, dict) else f"Article {article_num}"
                         results.append(result)
         
         except Exception as e:
@@ -343,39 +423,55 @@ class ConstitutionalArticleDetector:
             "article_number": article_num
         }
     
-    def detect(self, text: str, language: str = "en") -> List[Dict[str, Any]]:
+    def detect(self, text: str, language: str = "en", only_from_processed_constitutions: bool = True) -> List[Dict[str, Any]]:
         """
         Detect constitutional provisions in text.
-        Returns results from explicit article mentions; additionally applies
-        conservative keyword-based inference when explicit mentions are absent.
+        Uses processed_constitutions.json as the source of truth: only provisions
+        that appear there are returned, with exact text from the constitution.
+        When only_from_processed_constitutions is True (default), results without
+        a matching passage in processed_constitutions are excluded for 100% accuracy.
         """
-        print(f"\n=== Detecting Constitutional Provisions ===")
+        print(f"\n=== Detecting Constitutional Provisions (source: processed_constitutions.json) ===")
         
-        # 1. Extract explicit article mentions
+        # 1. Extract explicit article mentions (with constitution text when available)
         explicit_mentions = self.extract_article_mentions(text)
         print(f"Explicit mentions: {len(explicit_mentions)}")
         
-        # 2. If no explicit mentions found, apply conservative keyword inference
+        # 2. Semantic matches (case sentences similar to constitution sentences)
+        semantic_matches = self.detect_semantic_matches(text, top_k=5)
+        
+        # 3. If no explicit mentions, apply conservative keyword inference
         inferred: List[Dict[str, Any]] = []
         if not explicit_mentions:
             inferred = self._keyword_based_inference(text)
             if inferred:
                 print(f"Keyword-based inferred provisions: {len(inferred)}")
         
-        # Combine explicit + inferred
-        all_results = explicit_mentions + inferred
+        # Combine explicit + semantic + inferred
+        all_results = explicit_mentions + semantic_matches + inferred
         
-        # Deduplicate by (article, matched_text snippet)
+        # Deduplicate by (article, matched_text snippet); keep explicit mentions first (SLR/NLR accuracy)
         seen = set()
         unique_results = []
-        
         for result in all_results:
-            key = (result.get("article", ""), result["matched_text"][:100])
+            key = (result.get("article", ""), (result.get("matched_text") or "")[:100])
             if key not in seen:
                 seen.add(key)
                 unique_results.append(result)
-        
-        print(f"Total unique provisions detected: {len(unique_results)}")
+        # Prioritize explicit "Article N" mentions for SLR/NLR documents
+        unique_results.sort(
+            key=lambda r: (0 if (r.get("method") == "explicit_mention") else 1, -(r.get("score") or 0))
+        )
+
+        # 100% accuracy: only return provisions that exist in processed_constitutions.json
+        if only_from_processed_constitutions and PROCESSED_ARTICLE_TO_PROVISIONS:
+            unique_results = [
+                r for r in unique_results
+                if (r.get("constitution_provision_text") or [])
+            ]
+            print(f"Provisions with exact text from constitution: {len(unique_results)}")
+        else:
+            print(f"Total unique provisions detected: {len(unique_results)}")
         return unique_results
 
     def _keyword_based_inference(self, text: str) -> List[Dict[str, Any]]:
@@ -391,16 +487,19 @@ class ConstitutionalArticleDetector:
 
         def add(article: str, matched: str, score: float = 0.6):
             explanation = self._get_article_explanation(article)
+            provision_list = self.get_provision_from_processed_constitutions(article)
             item = {
                 "article": article,
                 "matched_text": matched,
                 "context": matched,
                 "method": "keyword_inference",
                 "score": score,
+                "constitution_provision_text": [p["text"] for p in provision_list] if provision_list else [],
+                "constitution_source_documents": list({p["document"] for p in provision_list}) if provision_list else [],
             }
             if explanation:
-                item["explanation"] = f"{explanation['title']}\n\n{explanation['text']}"
-                item["article_title"] = explanation['title']
+                item["explanation"] = f"{explanation.get('title', '')}\n\n{explanation.get('text', '')}" if isinstance(explanation, dict) else str(explanation)
+                item["article_title"] = explanation.get("title", f"Article {article}") if isinstance(explanation, dict) else f"Article {article}"
             results.append(item)
 
         # Article 140: writ jurisdiction keywords

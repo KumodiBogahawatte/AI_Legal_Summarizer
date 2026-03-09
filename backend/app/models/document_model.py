@@ -17,10 +17,15 @@ class LegalDocument(Base):
     court = Column(String, nullable=True)
     year = Column(Integer, nullable=True)
     case_number = Column(String, nullable=True)
-    embedding = Column(JSON, nullable=True)  # Store embeddings as JSON array
+    embedding = Column(JSON, nullable=True)  # Document-level embedding (backward compat)
+    chunk_count = Column(Integer, default=0)  # Number of RAG chunks created
     created_at = Column(DateTime, default=datetime.utcnow)
 
-    # Relations - Add violations
+    # Summaries (populated by ingestion pipeline or on-demand; migration adds DB columns)
+    executive_summary = Column(Text, nullable=True)
+    detailed_summary = Column(Text, nullable=True)  # JSON string or plain text
+
+    # Relations
     rights = relationship("DetectedRight", back_populates="document")
     citations = relationship("SLCitation", back_populates="document")
     violations = relationship("RightsViolation", back_populates="document")
@@ -28,6 +33,7 @@ class LegalDocument(Base):
     bookmarks = relationship("Bookmark", back_populates="document")
     versions = relationship("DocumentVersion", back_populates="document")
     legal_entities = relationship("LegalEntity", back_populates="document")
+    chunks = relationship("DocumentChunk", back_populates="document", cascade="all, delete-orphan")
 
 
 # ------------------- Pydantic Schema -------------------

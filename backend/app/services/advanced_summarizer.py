@@ -10,7 +10,7 @@ Uses hybrid extractive + abstractive approach with document structure awareness.
 """
 
 import re
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Set
 from collections import defaultdict
 import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -83,6 +83,10 @@ class AdvancedLegalSummarizer:
     def __init__(self):
         """Initialize the summarizer."""
         self.legal_terms_pattern = self._compile_legal_terms()
+    
+    def _normalize_sentence(self, sentence: str) -> str:
+        """Normalize sentence for overlap/duplicate checks."""
+        return " ".join(sentence.split()).strip().lower()
     
     def _compile_legal_terms(self):
         """Compile regex for important legal terms to preserve."""
@@ -535,7 +539,8 @@ class AdvancedLegalSummarizer:
     
     def generate_section_summaries(
         self,
-        structured_content: Dict[str, str]
+        structured_content: Dict[str, str],
+        executive_summary_text: Optional[str] = None
     ) -> Dict[str, Dict]:
         """
         Generate individual summaries for each section.
@@ -553,10 +558,25 @@ class AdvancedLegalSummarizer:
             Dict mapping section names to their summaries
         """
         section_summaries = {}
+        exec_exclude: Set[str] = set()
+        if executive_summary_text:
+            for s in legal_sent_tokenize(executive_summary_text):
+                norm = self._normalize_sentence(s)
+                if norm:
+                    exec_exclude.add(norm)
         
         for section, content in structured_content.items():
             try:
                 sentences = legal_sent_tokenize(content)
+                # Prefer sentences that are not already in the executive summary
+                if exec_exclude:
+                    filtered = [
+                        s for s in sentences
+                        if self._normalize_sentence(s) not in exec_exclude
+                    ]
+                    if filtered:
+                        sentences = filtered
+
                 scores = self._calculate_sentence_scores(sentences, section)
                 summary_text = self._extract_top_sentences(
                     sentences,
@@ -594,10 +614,17 @@ class AdvancedLegalSummarizer:
         Returns:
             Dict containing all summary levels
         """
+        executive = self.generate_executive_summary(text, structured_content)
+        detailed = self.generate_detailed_summary(text, structured_content)
+        section_specific = self.generate_section_summaries(
+            structured_content,
+            executive_summary_text=executive.get("summary", "") if structured_content else None,
+        ) if structured_content else {}
+
         return {
-            'executive': self.generate_executive_summary(text, structured_content),
-            'detailed': self.generate_detailed_summary(text, structured_content),
-            'section_specific': self.generate_section_summaries(structured_content) if structured_content else {},
+            'executive': executive,
+            'detailed': detailed,
+            'section_specific': section_specific,
             'document_stats': {
                 'total_words': len(text.split()),
                 'total_sentences': len(legal_sent_tokenize(text)),

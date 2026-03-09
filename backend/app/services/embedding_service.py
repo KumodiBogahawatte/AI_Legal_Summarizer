@@ -19,14 +19,17 @@ class EmbeddingService:
     Service for generating document embeddings using transformer models.
     """
     
-    def __init__(self, model_name: str = "sentence-transformers/all-MiniLM-L6-v2"):
+    def __init__(self, model_name: str = "BAAI/bge-base-en-v1.5"):
         """
         Initialize the embedding service with a pre-trained model.
-        
+
         Args:
-            model_name: Name of the sentence-transformer model to use
-                       Default: all-MiniLM-L6-v2 (fast, 384 dimensions)
-                       Alternative: all-mpnet-base-v2 (better, 768 dimensions, slower)
+            model_name: Name of the sentence-transformer model to use.
+                       Default: BAAI/bge-base-en-v1.5 (768-dim, optimized for legal/semantic retrieval)
+                       Alternative: all-MiniLM-L6-v2 (384-dim, faster but less accurate)
+
+        BGE Note: When encoding QUERIES for retrieval, use encode_for_retrieval() which
+        prepends the required instruction prefix. For document chunks, use generate_embedding().
         """
         self.model_name = model_name
         self.model = None
@@ -54,13 +57,73 @@ class EmbeddingService:
             logger.error(f"Error loading embedding model: {str(e)}")
             raise
     
+    def encode_for_retrieval(self, query: str) -> np.ndarray:
+        """
+        Encode a QUERY with the BGE instruction prefix.
+        Required for accurate retrieval with BAAI/bge-base-en-v1.5.
+
+        Args:
+            query: User query or search text
+
+        Returns:
+            Numpy array of shape (embedding_dim,). Never returns zero vector for non-empty query.
+        """
+        q = str(query).strip() if query is not None else ""
+        if not q:
+            return np.zeros(self.embedding_dim)
+        try:
+            # BGE instruction prefix for retrieval queries
+            prefixed = f"Represent this sentence for searching relevant passages: {q}"
+            out = self.model.encode(prefixed, convert_to_numpy=True, normalize_embeddings=True)
+            if out is None or (isinstance(out, np.ndarray) and out.size == 0):
+                raise ValueError("Model returned empty embedding")
+            vec = np.asarray(out, dtype=np.float64).flatten()
+            if vec.size != self.embedding_dim:
+                raise ValueError(f"Embedding size {vec.size} != {self.embedding_dim}")
+            n = np.linalg.norm(vec)
+            if n < 1e-6:
+                raise ValueError("Model returned zero-norm embedding")
+            return vec.astype(np.float32)
+        except Exception as e:
+            logger.error(f"Error in encode_for_retrieval: {str(e)}")
+            return np.zeros(self.embedding_dim)
+
+    def encode_for_retrieval_batch(self, texts: List[str]) -> np.ndarray:
+        """
+        Encode a batch of texts with BGE retrieval prefix.
+        Used by ConstitutionalRAGModule to encode article texts.
+
+        Args:
+            texts: List of texts to encode
+
+        Returns:
+            Numpy array of shape (len(texts), embedding_dim)
+        """
+        try:
+            if not texts:
+                return np.zeros((0, self.embedding_dim))
+            prefixed = [
+                f"Represent this sentence for searching relevant passages: {t}"
+                for t in texts
+            ]
+            return self.model.encode(
+                prefixed,
+                convert_to_numpy=True,
+                normalize_embeddings=True,
+                batch_size=32,
+                show_progress_bar=False,
+            )
+        except Exception as e:
+            logger.error(f"Error in encode_for_retrieval_batch: {str(e)}")
+            return np.zeros((len(texts), self.embedding_dim))
+
     def generate_embedding(self, text: str) -> np.ndarray:
         """
-        Generate embedding for a single text.
-        
+        Generate embedding for a single document chunk (no retrieval prefix).
+
         Args:
             text: Input text to embed
-            
+
         Returns:
             Numpy array of shape (embedding_dim,)
         """
@@ -68,12 +131,7 @@ class EmbeddingService:
             if not text or not text.strip():
                 logger.warning("Empty text provided, returning zero vector")
                 return np.zeros(self.embedding_dim)
-            
-            # Generate embedding
-            embedding = self.model.encode(text, convert_to_numpy=True)
-            
-            return embedding
-            
+            return self.model.encode(text, convert_to_numpy=True, normalize_embeddings=True)
         except Exception as e:
             logger.error(f"Error generating embedding: {str(e)}")
             return np.zeros(self.embedding_dim)

@@ -12,10 +12,12 @@ from .case_similarity_model import CaseSimilarity
 from .document_version_model import DocumentVersion
 from .audit_log_model import AuditLog
 from .legal_entity_model import LegalEntity
+# RAG pipeline models
+from .document_chunk_model import DocumentChunk, RAGJob
 
 __all__ = [
     "LegalDocument",
-    "UserPreference", 
+    "UserPreference",
     "DetectedRight",
     "SLCitation",
     "RightsViolation",
@@ -26,5 +28,8 @@ __all__ = [
     "CaseSimilarity",
     "DocumentVersion",
     "AuditLog",
-    "LegalEntity"
+    "LegalEntity",
+    # RAG
+    "DocumentChunk",
+    "RAGJob",
 ]

@@ -22,13 +22,13 @@ class PlainLanguageConverter:
     Converts legal documents to plain language for accessibility.
     """
     
-    # Legal terms to plain language mappings
+    # Legal terms to plain language mappings (appeal context: appellant = who appeals, respondent = who opposes the appeal)
     LEGAL_TO_PLAIN = {
-        # Legal actions
+        # Legal actions / parties
         r'\bpetitioner\b': 'person who filed the case',
-        r'\brespondent\b': 'person being accused',
-        r'\bappellant\b': 'person appealing the decision',
-        r'\bappellee\b': 'person responding to the appeal',
+        r'\brespondent\b': 'party opposing the appeal (e.g. complainant or prosecution)',
+        r'\bappellant\b': 'party bringing the appeal (e.g. the accused or the party who lost below)',
+        r'\bappellee\b': 'party responding to the appeal',
         r'\bplaintiff\b': 'person who filed the lawsuit',
         r'\bdefendant\b': 'person being sued',
         
@@ -93,6 +93,83 @@ class PlainLanguageConverter:
         r'\bsupra\b': 'mentioned above',
         r'\binfra\b': 'mentioned below',
         r'\bibid\.\b': 'same as above',
+
+        # Property, contract & lease (common in NLR/SLR)
+        r'\blessee\b': 'tenant; person who holds a lease',
+        r'\blessor\b': 'landlord; person who grants a lease',
+        r'\bconveyance\b': 'document that transfers property from seller to buyer',
+        r'\bassignment\b': 'transfer of rights or property to another',
+        r'\bdominium\b': 'full ownership of property (Roman-Dutch law term)',
+        r'\bVoet\b': 'authority on Roman-Dutch law often cited in Sri Lankan courts',
+        r'\bstipulated\b': 'agreed or set out in the contract',
+        r'\bpremises\b': 'property or building (e.g. rented premises)',
+        r'\brents?\b': 'money paid regularly for use of property',
+        r'\bvendor\b': 'seller (e.g. of property)',
+        r'\bpurchaser\b': 'buyer',
+
+        # Courts & procedure
+        r'\bCourt of Requests\b': 'old name for a lower court (e.g. C.R. Colombo)',
+        r'\bC\.\s*R\.\b': 'Court of Requests (lower court)',
+        r'\blearned (?:judge|Magistrate|Judge)\b': 'judge (formal way of address)',
+        r'\bSolicitor-?General\b': 'senior lawyer representing the government',
+        r'\bActing S\.?-?G\.\b': 'Acting Solicitor-General',
+        r'\bcounsel\b': 'lawyer representing a party in court',
+        r'\bfor (?:the )?appellant\b': 'lawyer for the party bringing the appeal',
+        r'\bfor (?:the )?respondent\b': 'lawyer for the party opposing the appeal',
+        r'\bheld\b': 'decided (as in "the court held that...")',
+        r'\bholding\b': 'the court\'s decision on the legal issue',
+        r'\breasoning\b': 'the court\'s explanation for its decision',
+        r'\bjudgment\b': 'court\'s final decision and reasons',
+        r'\bdecree\b': 'formal court order that gives effect to the judgment',
+        r'\border\b': 'court\'s direction or decision',
+        r'\baffirmed\b': 'upheld; higher court agreed with lower court',
+        r'\bdismissed\b': 'rejected (e.g. appeal dismissed)',
+        r'\ballowed\b': 'accepted (e.g. appeal allowed)',
+        r'\bremand(?:ed)?\b': 'sent the case back to a lower court',
+        r'\bquashed\b': 'cancelled or set aside by the court',
+        r'\bset aside\b': 'cancelled by the court',
+
+        # Legal concepts (more)
+        r'\bres judicata\b': 'a matter already decided by a court cannot be raised again',
+        r'\bstare decisis\b': 'courts follow earlier decisions on the same point of law',
+        r'\bcause of action\b': 'the set of facts that give a party the right to sue',
+        r'\blocus standi\b': 'right to bring a case (standing before the court)',
+        r'\bprima facie\b': 'at first sight; enough evidence to require an answer',
+        r'\bburden of proof\b': 'duty to prove the facts in dispute',
+        r'\bstandard of proof\b': 'how strong the evidence must be (e.g. beyond reasonable doubt)',
+        r'\bin point\b': 'relevant to the issue (e.g. "the passage is in point")',
+        r'\bobiter dictum\b': 'remark by a judge not essential to the decision',
+        r'\bratio decidendi\b': 'the legal reason for the court\'s decision; the binding part of a judgment',
+        r'\bbinding (?:precedent|authority)\b': 'earlier decision that must be followed',
+        r'\bpersuasive (?:authority|precedent)\b': 'earlier decision that may be followed',
+        r'\bdistinguished\b': 'treated as different from an earlier case so not applied',
+        r'\boverruled\b': 'earlier decision no longer good law',
+        r'\breversed\b': 'higher court changed the lower court\'s decision',
+
+        # Documents & process
+        r'\bpleaded\b': 'stated in court (e.g. the defendant pleaded that...)',
+        r'\bpleading\b': 'written statement of a party\'s case',
+        r'\bdeed\b': 'signed document that transfers or creates a right',
+        r'\bheadnote\b': 'short summary at the top of a reported case',
+        r'\bcitation\b': 'reference to a case or law (e.g. year, volume, page)',
+        r'\bNLR\b': 'New Law Reports (Sri Lankan case law series)',
+        r'\bSLR\b': 'Sri Lanka Law Reports (Sri Lankan case law series)',
+        r'\bSLLR\b': 'Sri Lanka Law Reports (alternative abbreviation)',
+
+        # Latin & formal
+        r'\binter alia\b': 'among other things',
+        r'\bad hoc\b': 'for this specific purpose',
+        r'\bipso facto\b': 'by that very fact',
+        r'\bultra vires\b': 'beyond legal power',
+        r'\bintra vires\b': 'within legal power',
+        r'\bmutatis mutandis\b': 'with necessary changes',
+        r'\bsub judice\b': 'case currently before the court',
+        r'\bamicus curiae\b': 'friend of the court; person allowed to give a view',
+        r'\bex parte\b': 'application by one side without the other being present',
+        r'\bin limine\b': 'at the outset; preliminary',
+        r'\bper se\b': 'by itself',
+        r'\bproviso\b': 'condition or exception in a law or contract',
+        r'\bschedule\b': 'list or appendix to a law or contract',
     }
     
     # Article explanations
@@ -212,30 +289,53 @@ class PlainLanguageConverter:
     def generate_glossary(self, text: str) -> List[Dict[str, str]]:
         """
         Generate a glossary of legal terms found in the text.
-        
-        Args:
-            text: Legal text to analyze
-        
-        Returns:
-            List of term definitions
+        Uses LEGAL_TO_PLAIN patterns and, if loaded, custom_glossary.
+        Deduplicates by term (same term keeps highest occurrence count).
         """
-        glossary = []
-        
+        seen_lower: Dict[str, int] = {}  # term_lower -> index in glossary list
+        glossary: List[Dict[str, str]] = []
+
+        def add_entry(term: str, definition: str, occurrences: int) -> None:
+            key = term.strip().lower()
+            if not key or not definition.strip():
+                return
+            if key in seen_lower:
+                idx = seen_lower[key]
+                glossary[idx]["occurrences"] = glossary[idx]["occurrences"] + occurrences
+                return
+            seen_lower[key] = len(glossary)
+            glossary.append({
+                "term": term.strip(),
+                "definition": definition.strip(),
+                "occurrences": occurrences,
+            })
+
         for legal_pattern, plain_term in self.LEGAL_TO_PLAIN.items():
             matches = re.findall(legal_pattern, text, re.IGNORECASE)
             if matches:
-                # Get unique matches
                 unique_matches = list(set(matches))
                 for match in unique_matches:
-                    glossary.append({
-                        'term': match,
-                        'definition': plain_term,
-                        'occurrences': len([m for m in matches if m.lower() == match.lower()])
-                    })
-        
-        # Sort by occurrences
-        glossary.sort(key=lambda x: x['occurrences'], reverse=True)
-        
+                    count = len([m for m in matches if m.lower() == match.lower()])
+                    add_entry(match, plain_term, count)
+
+        # Custom glossary (e.g. legal_terms from JSON: { "term_key": { "en": "definition" } })
+        if self.custom_glossary:
+            legal_terms = self.custom_glossary.get("legal_terms") or self.custom_glossary
+            if isinstance(legal_terms, dict):
+                for key, val in legal_terms.items():
+                    if isinstance(val, dict) and "en" in val:
+                        defn = val["en"]
+                    elif isinstance(val, str):
+                        defn = val
+                    else:
+                        continue
+                    # Search for the key as a phrase (with spaces for multi-word)
+                    pattern = r"\b" + re.escape(key.replace("_", " ")) + r"\b"
+                    matches = re.findall(pattern, text, re.IGNORECASE)
+                    if matches:
+                        add_entry(matches[0], defn, len(matches))
+
+        glossary.sort(key=lambda x: x["occurrences"], reverse=True)
         return glossary
     
     def convert_summary_to_plain(

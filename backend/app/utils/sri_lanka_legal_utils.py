@@ -193,12 +193,111 @@ def extract_case_number(text: str):
             return match.group(0).strip()
     return None
 
-def extract_court(text: str):
-    courts = ["Supreme Court", "Court of Appeal", "High Court"]
-    for court in courts:
-        if court.lower() in text.lower():
-            return court
+def extract_court(text: str, file_name: str = "") -> str:
+    """
+    Extract the court name from the judgment text (and optionally filename).
+    Checks Sri Lankan court levels and NLR-style abbreviations (P. C., D. C., C. R., S. C.).
+    Searches first 6000 chars to catch headnote court labels.
+    """
+    search_text = (text or "")[:6000]
+    text_upper = search_text.upper()
+    fn_upper = (file_name or "").upper()
+
+    # Priority order: highest court first (full names then abbreviations)
+    court_patterns = [
+        (r'\bPRIVY\s+COUNCIL\b',                        'Privy Council'),
+        (r'\bJUDICIAL\s+COMMITTEE\b',                   'Privy Council'),
+        (r'\bP\.\s*C\.\b',                              'Privy Council'),   # NLR headnote
+        (r'\bSUPREME\s+COURT\b',                        'Supreme Court'),
+        (r'\bS\.C\.\s+(?:APPEAL|FR|SPL)\b',             'Supreme Court'),
+        (r'\bS\.\s*C\.\b',                              'Supreme Court'),   # NLR/SLR abbreviation
+        (r'\bSC\s+(?:APPEAL|FR|APPLICATION)\s+NO\b',   'Supreme Court'),
+        (r'\bFULL\s+BENCH\b',                           'Supreme Court'),
+        (r'\bCOURT\s+OF\s+APPEAL\b',                    'Court of Appeal'),
+        (r'\bC\.A\.\s+NO\b',                            'Court of Appeal'),
+        (r'\bHIGH\s+COURT\b',                           'High Court'),
+        (r'\bH\.C\.\s+NO\b',                            'High Court'),
+        (r'\bDISTRICT\s+COURT\b',                       'District Court'),
+        (r'\bD\.\s*C\.',                                'District Court'),   # D. C. or D.C.
+        (r'\bD\.C[,\.\s]',                              'District Court'),
+        (r'\bD\.?-?J\.\b',                              'District Court'),
+        (r'\bCOURT\s+OF\s+REQUESTS?\b',                 'Court of Requests'),
+        (r'\bC\.\s*R\.',                                'Court of Requests'), # C. R. in NLR
+        (r'\bCOMMISSIONER.S\s+COURT\b',                 'Commissioner\'s Court'),
+        (r'\bMAGISTRATE.{0,5}COURT\b',                  "Magistrate's Court"),
+    ]
+    for pat, name in court_patterns:
+        if re.search(pat, text_upper):
+            return name
+
+    # Filename hint: NLR volumes often indicate Privy Council in headnote; SLR often Supreme Court
+    if 'NLR' in fn_upper or 'NEW-LAW' in fn_upper.replace(' ', '-'):
+        if re.search(r'\bP\.\s*C\.\b', text_upper):
+            return 'Privy Council'
+        if re.search(r'\bD\.\s*C\.|\bD\.C\.', text_upper):
+            return 'District Court'
+        if re.search(r'\bC\.\s*R\.|\bC\.R\.', text_upper):
+            return 'Court of Requests'
+    if 'SLR' in fn_upper or 'SRI-L' in fn_upper.replace(' ', '-'):
+        if re.search(r'\bS\.\s*C\.\b|\bSUPREME\s+COURT\b', text_upper):
+            return 'Supreme Court'
+        if re.search(r'\bCOURT\s+OF\s+APPEAL\b|\bC\.A\.', text_upper):
+            return 'Court of Appeal'
     return None
+
+
+def extract_case_citation(text: str, filename: str = '') -> str:
+    """
+    Extract the primary NLR/SLR citation for storage in the DB.
+    Tries text first, then falls back to filename parsing.
+    """
+    cite_patterns = [
+        r'\(\d{4}\)\s*\d+\s+(?:SLR|NLR|SLLR)\s+\d+',
+        r'\[\d{4}\]\s*\d+\s+(?:SLR|NLR|SLLR)\s+\d+',
+        r'\b\d{1,3}\s+(?:SLR|NLR|SLLR)\s+\d{1,4}\b',
+    ]
+    for pat in cite_patterns:
+        m = re.search(pat, text[:3000], re.IGNORECASE)
+        if m:
+            return m.group(0).strip()
+    # Filename fallback
+    if filename:
+        fn = filename.upper().replace('_', '-')
+        mv = re.search(r'NLR-V(?:OL)?[\-]?(\d+)', fn)
+        if mv:
+            vol = mv.group(1)
+            mp = re.search(r'NLR-V(?:OL)?[\-]?\d+[\-][A-Z0-9\.-]+-([\d]+)[\-]', fn)
+            page = mp.group(1) if mp else ''
+            return f'{vol} NLR {page}'.strip()
+    return ''
+
+
+def extract_case_year(text: str) -> int:
+    """
+    Extract the case year from the judgment text.
+    Uses the most-prominent year (highest frequency) in the first 2000 chars
+    rather than the minimum — this avoids picking up ancient Roman-Dutch dates.
+    Prefers years in citation patterns (most reliable).
+    """
+    # First try: years embedded in NLR/SLR citation pattern (most reliable)
+    cite_year = re.search(
+        r'(?:\(|\[)(1[89]\d{2}|20\d{2})(?:\)|\])(?:\s+\d+)?\s+(?:NLR|SLR|SLLR)',
+        text[:3000], re.IGNORECASE
+    )
+    if cite_year:
+        return int(cite_year.group(1))
+
+    # Second: find all 4-digit years in first 2000 chars and pick most frequent
+    pattern = r'\b(1[89]\d{2}|20\d{2})\b'
+    all_years = [int(y) for y in re.findall(pattern, text[:2000])
+                 if 1800 <= int(y) <= 2030]
+    if not all_years:
+        return None
+    # Most frequent year = likely the judgment or publication year
+    from collections import Counter
+    freq = Counter(all_years)
+    return freq.most_common(1)[0][0]
+
 
 # -----------------------------
 # CONSTITUTIONAL PROVISION DETECTOR
