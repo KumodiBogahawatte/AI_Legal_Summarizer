@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse
 from sqlalchemy.orm import Session
+import re
 from ..db import SessionLocal
 from ..models.document_model import LegalDocument
 from ..services.nlp_analyzer import NLPAnalyzer
@@ -2069,11 +2070,18 @@ def _get_corpus_pdf_path(file_name: str):
     manifest_path = data_processed / "corpus_pdf_paths.json"
     if not manifest_path.exists():
         manifest_path = backend_processed / "corpus_pdf_paths.json"
-    if not manifest_path.exists():
-        return None
-    with open(manifest_path, "r", encoding="utf-8") as f:
-        data = _json.load(f)
-    paths_map = data.get("paths") or {}
+
+    # If manifest is missing, fall back to empty mapping but still try filesystem search
+    data = {}
+    paths_map = {}
+    if manifest_path.exists():
+        try:
+            with open(manifest_path, "r", encoding="utf-8") as f:
+                data = _json.load(f) or {}
+            paths_map = data.get("paths") or {}
+        except Exception:
+            data = {}
+            paths_map = {}
     candidates = [
         file_name,
         _normalize_corpus_filename(file_name),
@@ -2087,17 +2095,35 @@ def _get_corpus_pdf_path(file_name: str):
         rel_path = paths_map.get(c)
         if rel_path:
             break
-    if not rel_path:
-        return None
+
     base = os.environ.get("CORPUS_PDF_DIR")
     if base:
         base_path = Path(base)
     else:
         base_path = Path(data.get("base_dir", str(project_root / "raw_documents")))
-    full = base_path / rel_path
-    if not full.is_file():
-        return None
-    return full
+
+    # 1) If manifest has a relative path, try that first
+    if rel_path:
+        full = base_path / rel_path
+        if full.is_file():
+            return full
+
+    # 2) Fallback: search the corpus directory tree for any of the candidate names
+    #    This helps when manifest is stale or key normalisation doesn't match,
+    #    but the PDF actually exists somewhere under CORPUS_PDF_DIR/raw_documents.
+    try:
+        for root, _dirs, files in os.walk(base_path):
+            files_set = set(files)
+            for c in candidates:
+                if not c:
+                    continue
+                if c in files_set:
+                    return Path(root) / c
+    except Exception:
+        # Best-effort search; if it fails we just return None.
+        pass
+
+    return None
 
 
 @router.get("/corpus-pdf-view", response_class=HTMLResponse)

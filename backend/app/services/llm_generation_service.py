@@ -86,13 +86,13 @@ Retrieved Constitutional Articles matched:
 
 Task: Analyse the constitutional rights dimension of this case.
 
-Write your answer as a short, structured note with the following numbered headings:
-1. **Engaged constitutional rights** – list the specific Articles (by number and title) that are clearly engaged by the case.
-2. **Court's interpretation and application** – explain how the court interpreted or applied those rights, grounded strictly in the context.
-3. **Violation and remedy** – state clearly whether a violation was found, and what remedy (if any) was granted (e.g. dismissed, compensation, writs, declaratory relief).
-4. **Significance for Sri Lankan constitutional law** – briefly explain why this case matters (or state that its broader significance is not clearly articulated in the judgment).
+Write your answer as a short, structured note with the following numbered headings (no bold or other markdown formatting):
+1. Engaged constitutional rights – list the specific Articles (by number and title) that are clearly engaged by the case.
+2. Court's interpretation and application – explain how the court interpreted or applied those rights, grounded strictly in the context.
+3. Violation and remedy – state clearly whether a violation was found, and what remedy (if any) was granted (e.g. dismissed, compensation, writs, declaratory relief).
+4. Significance for Sri Lankan constitutional law – briefly explain why this case matters (or state that its broader significance is not clearly articulated in the judgment).
 
-Do NOT include any introductory sentences like \"Based on the retrieved context...\" or closing summaries. Start directly with the numbered headings above.
+Do NOT include any introductory sentences like \"Based on the retrieved context...\" or closing summaries. Start directly with the numbered headings above, exactly as written.
 If no constitutional issue is mentioned in the context, clearly state that under heading 1 and keep the remaining sections very brief.
 
 Analysis:"""
