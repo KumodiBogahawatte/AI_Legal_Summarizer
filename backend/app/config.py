@@ -7,8 +7,8 @@ from urllib.parse import quote_plus
 BASE_DIR = Path(__file__).resolve().parent.parent  # backend/app -> backend
 PROJECT_ROOT = BASE_DIR.parent  # backend -> project root
 
-# Load environment variables
-load_dotenv(PROJECT_ROOT / ".env")
+# Load environment variables from backend directory
+load_dotenv(BASE_DIR / ".env")
 
 # Database Configuration
 DATABASE_TYPE = os.getenv("DATABASE_TYPE", "postgresql")  # Default to PostgreSQL

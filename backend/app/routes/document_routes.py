@@ -2,83 +2,109 @@ from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 import os
 import shutil
+
 from app.db import get_db  # Use absolute import
-from app.services.document_processor import DocumentProcessor
-from app.services.sri_lanka_legal_engine import SriLankaLegalEngine
+from app.services.document_ingestion_pipeline import run_ingestion_pipeline
+
 
 router = APIRouter(prefix="/documents", tags=["Documents"])
 
 UPLOAD_DIR = "uploaded_docs"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
+
 @router.post("/upload-sri-lanka")
 async def upload_sri_lanka_document(
-    file: UploadFile = File(...), 
-    db: Session = Depends(get_db)
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
 ):
-    try:
-        if not file.filename or not file.filename.lower().endswith(".pdf"):
-            raise HTTPException(400, "Only PDF files allowed")
+    """
+    Upload a Sri Lankan legal PDF (NLR/SLR) and run the full ingestion pipeline.
+    Every file is validated; only original NLR/SLR reports are accepted.
 
-        # Save file
-        file_path = os.path.join(UPLOAD_DIR, file.filename)
+    This uses run_ingestion_pipeline as the canonical path, which:
+      - extracts & validates text,
+      - detects fundamental rights and citations,
+      - chunks & embeds for RAG,
+      - indexes in Elasticsearch (if available),
+      - generates executive/detailed summaries and constitutional analysis.
+    """
+    file_path = None
+    try:
+        print(f"[upload-sri-lanka] Incoming file: {getattr(file, 'filename', None)}")
+        if not file.filename:
+            raise HTTPException(status_code=400, detail="No filename provided")
+        # Normalize duplicate .pdf.pdf -> .pdf
+        file_name = file.filename.strip()
+        while file_name.lower().endswith(".pdf.pdf"):
+            file_name = file_name[:-4]  # strip trailing .pdf
+        if not file_name.lower().endswith(".pdf"):
+            raise HTTPException(status_code=400, detail="Only PDF files allowed")
+
+        # Save file to disk
+        file_path = os.path.join(UPLOAD_DIR, file_name)
         with open(file_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
 
-        # Read file bytes for processing
+        # Read file bytes for pipeline (needed for OCR fallback, etc.)
         with open(file_path, "rb") as f:
             file_bytes = f.read()
 
-        # Process document (includes validation)
+        # Run the canonical ingestion pipeline (validation + all downstream stages)
         try:
-            doc = DocumentProcessor.process_and_save(
+            print(f"[upload-sri-lanka] Starting run_ingestion_pipeline for: {file_name}")
+            document, result = run_ingestion_pipeline(
                 db=db,
-                file_name=file.filename,
+                file_name=file_name,
                 file_path=file_path,
                 file_bytes=file_bytes,
             )
+            print(f"[upload-sri-lanka] Pipeline completed for: {file_name} (doc_id={document.id})")
         except ValueError as ve:
             # Validation error - return 400 with clear message
-            if os.path.exists(file_path):
+            if file_path and os.path.exists(file_path):
                 os.remove(file_path)
-            raise HTTPException(400, str(ve))
+            raise HTTPException(status_code=400, detail=str(ve))
 
-        # Legal analysis
-        rights = SriLankaLegalEngine.detect_fundamental_rights(
-            db=db, doc_id=doc.id, text=doc.cleaned_text or ""
-        )
+        # Prepare response using pipeline outputs
+        rights_detected = len(result.get("rights_detected", []))
+        citations_found = len(result.get("citations_found", []))
 
-        citations = SriLankaLegalEngine.extract_citations(
-            db=db, doc_id=doc.id, text=doc.cleaned_text or ""
-        )
-        
-        # Prepare response
         response = {
-            "document_id": doc.id,
-            "file_name": file.filename,
-            "rights_detected": len(rights),
-            "citations_detected": len(citations),
+            "document_id": document.id,
+            "file_name": file_name,
+            "rights_detected": rights_detected,
+            "citations_detected": citations_found,
             "message": "Document processed successfully",
             "metadata": {
-                "court": doc.court,
-                "year": doc.year,
-                "case_number": doc.case_number
-            }
+                "court": document.court,
+                "year": document.year,
+                "case_number": document.case_number,
+            },
+            "pipeline": {
+                "stages_completed": result.get("stages_completed", []),
+                "stages_failed": result.get("stages_failed", []),
+                "warnings": result.get("warnings", []),
+            },
+            "text_length": result.get("text_length", 0),
+            "extraction_quality": result.get("extraction_quality", "ok"),
         }
-        
-        # Add structure analysis if available
-        if hasattr(doc, 'structure_analysis') and doc.structure_analysis:
+
+        # Add structure analysis if available (DocumentProcessor attaches this in-memory)
+        if hasattr(document, "structure_analysis") and document.structure_analysis:
             response["structure_analysis"] = {
-                "total_paragraphs": doc.structure_analysis['total_paragraphs'],
-                "sections": doc.structure_analysis['section_distribution'],
-                "classification_methods": doc.structure_analysis['method_distribution']
+                "total_paragraphs": document.structure_analysis.get("total_paragraphs"),
+                "sections": document.structure_analysis.get("section_distribution"),
+                "classification_methods": document.structure_analysis.get(
+                    "method_distribution"
+                ),
             }
 
         return response
-        
+
     except HTTPException:
         raise
     except Exception as e:
-        if os.path.exists(file_path):
+        if file_path and os.path.exists(file_path):
             os.remove(file_path)
-        raise HTTPException(500, f"Upload failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")

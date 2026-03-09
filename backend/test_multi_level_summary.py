@@ -11,7 +11,7 @@ Tests the new summarization endpoints:
 import requests
 import json
 
-BASE_URL = "http://127.0.0.1:8000/api/analysis"
+BASE_URL = "http://127.0.0.1:8011/api/analysis"
 
 def test_executive_summary(document_id=1):
     """Test executive summary endpoint."""

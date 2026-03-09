@@ -28,7 +28,7 @@ FR_ARTICLE_EXPLANATIONS = {
     "14A": "Right to Access Information: (1) Every citizen shall have the right of access to any information as provided for by law, being information that is required for the exercise or protection of a citizen's right. (2) No restrictions shall be placed on the right declared and recognized by this Article, other than such restrictions as may be prescribed by law in the interests of national security, the prevention of crime or the protection of public health or morality, or for the purpose of protecting the privacy of other persons.",
     "15": "Restrictions on Fundamental Rights: The exercise and operation of the fundamental rights declared and recognized by Articles 12(1), 13 and 14 shall be subject to such restrictions as may be prescribed by law in the interests of national security, public order and the protection of public health or morality, or for the purpose of securing due recognition and respect for the rights and freedoms of others, or of meeting the just requirements of the general welfare of a democratic society.",
     "16": "Existing Written Law and Unwritten Law: (1) All existing written law and unwritten law shall, to the extent that they are inconsistent with the provisions of this Chapter, be and shall be deemed to have been amended or repealed on the commencement of the Constitution and thereafter continue in force as so amended and such amendment or repeal shall be in addition to any amendment or repeal effected by any other provision of the Constitution.",
-    "17": "Duties of Every Person: Every person shall be subject to such duties as are determined by law. Such duties shall include respect for the national flag and the national anthem and such other duties as tend to uphold and strengthen national solidarity."
+    "17": "Remedy for the Infringement of Fundamental Rights by Executive Action: Every person shall be entitled to apply to the Supreme Court, as provided by Article 126, in respect of the infringement or imminent infringement, by executive or administrative action, of a fundamental right to which such person is entitled under the provisions of this Chapter."
 }
 
 BASE = Path(__file__).resolve().parents[3]  # backend/app/..
@@ -311,13 +311,19 @@ class FundamentalRightsDetector:
                     
                     pattern_count += 1
                     explanation_data = self._get_article_explanation(str(art))
+                    matched_fragment = match.group(0)
                     results.append({
                         "article": str(art),
                         "method": "pattern",
                         "score": 1.0,
                         "matched_text": sent,
                         "article_title": explanation_data["title"],
-                        "explanation": explanation_data["text"]
+                        # Explain WHY we think this passage engages the right, without
+                        # duplicating the full constitutional text.
+                        "explanation": (
+                            f'This right is detected because the judgment passage containing '
+                            f'"{matched_fragment}" appears to engage {explanation_data["title"]}.'
+                        )
                     })
         
         print(f"Pattern matching found {pattern_count} matches")
@@ -417,7 +423,11 @@ class FundamentalRightsDetector:
                                 "score": max_score,
                                 "matched_text": sent,
                                 "article_title": explanation_data["title"],
-                                "explanation": explanation_data["text"]
+                                # Explain the semantic link instead of repeating the FR text.
+                                "explanation": (
+                                    f'This passage of the judgment is semantically close to '
+                                    f'{explanation_data["title"]} under the Constitution.'
+                                )
                             })
                     
                     print(f"Semantic matching (trained) found {semantic_count} matches")
@@ -450,13 +460,18 @@ class FundamentalRightsDetector:
         results: List[Dict[str, Any]] = []
 
         def add(article: str, matched: str, score: float = 0.6):
-            explanation = self._get_article_explanation(article)
+            explanation_data = self._get_article_explanation(article)
+            title = explanation_data.get("title", f"Article {article} - Fundamental Right") if isinstance(explanation_data, dict) else f"Article {article} - Fundamental Right"
+            explanation_text = (
+                f'This right is inferred because the judgment refers to "{matched}", '
+                f'which typically indicates an issue under {title}.'
+            )
             results.append({
                 "article": article,
                 "method": "keyword_inference",
                 "score": score,
                 "matched_text": matched,
-                "explanation": explanation
+                "explanation": explanation_text
             })
 
         # Article 12
