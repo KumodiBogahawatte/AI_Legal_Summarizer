@@ -39,8 +39,8 @@ frontend/dist/
 *.db
 
 # Environment variables (sensitive)
-backend/.env
 .env
+backend/.env
 
 # PostgreSQL backups
 backend/backups/
