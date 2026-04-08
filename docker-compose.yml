@@ -90,14 +90,6 @@ services:
     command: celery -A celery_app worker --loglevel=info --concurrency=2
     working_dir: /app
 
-  # React frontend
-  frontend:
-    build:
-      context: ./Frontend-main/Frontend
-    ports:
-      - "5173:5173"
-    command: npm run dev -- --host
-
 volumes:
   postgres_data:
   es_data:
