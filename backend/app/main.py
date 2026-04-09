@@ -21,6 +21,8 @@ app.add_middleware(
         "http://159.223.43.32",
         "http://159.223.43.32:80",
         "https://159.223.43.32",
+        "http://ailegalsummarizersliit.site",
+        "https://ailegalsummarizersliit.site",
     ],
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
