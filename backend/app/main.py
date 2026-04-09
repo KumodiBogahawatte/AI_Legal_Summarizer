@@ -27,15 +27,15 @@ app.add_middleware(
 )
 
 # Import and include all routes
-from app.routes.document_routes import router as document_router
-from app.routes.summary_routes import router as summary_router
-from app.routes.user_routes import router as user_router
+from backend.app.routes.document_routes import router as document_router
+from backend.app.routes.summary_routes import router as summary_router
+from backend.app.routes.user_routes import router as user_router
 
-from app.routes.ner_routes import router as ner_router
+from backend.app.routes.ner_routes import router as ner_router
 
 # New RAG v2 and Search routes
-from app.routes.rag_v2_routes import router as rag_v2_router
-from app.routes.search_routes import router as search_router
+from backend.app.routes.rag_v2_routes import router as rag_v2_router
+from backend.app.routes.search_routes import router as search_router
 
 app.include_router(document_router, prefix="/api")
 app.include_router(summary_router, prefix="/api/analysis")
