@@ -23,6 +23,7 @@ app.add_middleware(
         "https://159.223.43.32",
         "http://ailegalsummarizersliit.site",
         "https://ailegalsummarizersliit.site",
+        "https://lawknow.vercel.app",
     ],
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
