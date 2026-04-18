@@ -49,6 +49,8 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+    env_file:
+      - ./backend/.env
     ports:
       - "8011:8011"
     depends_on:
@@ -61,7 +63,6 @@ services:
       - DATABASE_TYPE=postgresql
       - REDIS_URL=redis://redis:6379/0
       - ELASTICSEARCH_URL=http://elasticsearch:9200
-      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
     volumes:
       - ./backend:/app
       - uploaded_docs:/app/uploaded_docs
@@ -72,6 +73,8 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+    env_file:
+      - ./backend/.env
     depends_on:
       postgres:
         condition: service_healthy
