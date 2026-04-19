@@ -14,6 +14,7 @@ router = APIRouter(prefix="/documents", tags=["Documents"])
 async def options_upload_sri_lanka():
     return Response(status_code=204)
 
+
 UPLOAD_DIR = "uploaded_docs"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
