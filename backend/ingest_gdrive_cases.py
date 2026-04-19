@@ -18,9 +18,13 @@ from datetime import datetime
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    format='%(asctime)s [%(levelname)s]   %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
 )
 logger = logging.getLogger(__name__)
+# Add milliseconds to logging
+logging.Formatter.default_time_format = '%Y-%m-%d %H:%M:%S'
+logging.Formatter.default_msec_format = '%s,%03d'
 
 # Import database and models
 from app.db import SessionLocal
@@ -97,7 +101,7 @@ def download_and_extract_pdf(gdrive_url: str, max_pages: int = 200) -> Optional[
         else:
             url = gdrive_url
         
-        logger.info(f"Downloading from: {url[:80]}...")
+        logger.info(f"Downloading: {gdrive_url.split('/')[-1] if '/' in gdrive_url else gdrive_url}")
         
         # Download PDF with timeout
         response = requests.get(url, timeout=30, allow_redirects=True)
@@ -140,6 +144,8 @@ def ingest_case(
     Returns: (success: bool, message: str)
     """
     try:
+        filename = Path(file_path).name
+        
         # Check if already exists
         if skip_existing:
             existing = session.query(LegalDocument).filter(
@@ -149,15 +155,20 @@ def ingest_case(
                 return True, f"Skipped (already exists)"
         
         # Download and extract PDF text
+        logger.info(f"Downloading: {filename}")
         text = download_and_extract_pdf(gdrive_url)
         if not text:
             return False, "Failed to extract text from PDF"
+        
+        logger.info(f"Extracting text: {filename}")
         
         # Extract metadata
         case_name = get_case_name_from_path(file_path)
         court = extract_court_from_text(text)
         year = extract_year(text)
         case_number = extract_case_number(text)
+        
+        logger.info(f"✓ Extracted {len(text)} characters")
         
         # Create document
         doc = LegalDocument(
@@ -173,6 +184,8 @@ def ingest_case(
         
         session.add(doc)
         session.commit()
+        
+        logger.info(f"✓ Stored in database (ID: {doc.id})")
         
         return True, f"Ingested: {case_name}"
         
@@ -213,16 +226,13 @@ def main():
                 logger.info(f"Reached maximum documents limit ({args.max_docs})")
                 break
             
-            logger.info(f"\nProcessing: {file_path}")
             success, message = ingest_case(file_path, gdrive_url, session, args.skip_existing)
             
             if success:
                 if "Skipped" in message:
                     skipped += 1
-                    logger.info(f"  ✓ {message}")
                 else:
                     processed += 1
-                    logger.info(f"  ✓ {message}")
             else:
                 failed += 1
                 logger.error(f"  ✗ {message}")
