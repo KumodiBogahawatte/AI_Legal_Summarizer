@@ -1,7 +1,8 @@
-from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, status
+from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, status, Response
 from sqlalchemy.orm import Session
 import os
 import shutil
+import json
 
 from app.db import get_db  # Use absolute import
 from app.services.document_ingestion_pipeline import run_ingestion_pipeline
@@ -9,9 +10,20 @@ from app.services.document_ingestion_pipeline import run_ingestion_pipeline
 
 router = APIRouter(prefix="/documents", tags=["Documents"])
 
+@router.options("/upload-sri-lanka")
+async def options_upload_sri_lanka():
+    return Response(status_code=204)
+
 UPLOAD_DIR = "uploaded_docs"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
+# Load Google Drive PDF mapping once at startup
+GDRIVE_PDF_MAP_PATH = os.path.join(os.path.dirname(__file__), '../../../data/gdrive_pdf_urls_recursive.json')
+if os.path.exists(GDRIVE_PDF_MAP_PATH):
+    with open(GDRIVE_PDF_MAP_PATH, encoding='utf-8') as f:
+        GDRIVE_PDF_URLS = json.load(f)
+else:
+    GDRIVE_PDF_URLS = {}
 
 @router.post("/upload-sri-lanka")
 async def upload_sri_lanka_document(
@@ -108,3 +120,13 @@ async def upload_sri_lanka_document(
         if file_path and os.path.exists(file_path):
             os.remove(file_path)
         raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
+
+@router.get("/past-case-pdf")
+def get_past_case_pdf(path: str):
+    """
+    Get the Google Drive direct link for a past case PDF by relative path (e.g., 'NLR_All_Volumes/Case1.pdf').
+    """
+    url = GDRIVE_PDF_URLS.get(path)
+    if not url:
+        raise HTTPException(status_code=404, detail="PDF not found")
+    return {"url": url}
