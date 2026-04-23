@@ -48,14 +48,17 @@ env/
 
 # Local directories
 Frontend-main/
+Frontend/
 data/processed/
 raw_documents/
 uploaded_docs/
 
 # Node.js
 node_modules/
-npm-debug.log
-yarn-error.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
 .next/
 
 # Build outputs

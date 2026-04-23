@@ -40,6 +40,8 @@ from typing import Optional, Tuple, Dict, List
 import numpy as np
 from sqlalchemy.orm import Session
 
+from app.config import INGESTION_SKIP_POST_CHUNK_LLM
+
 logger = logging.getLogger(__name__)
 
 
@@ -286,9 +288,17 @@ def run_ingestion_pipeline(
         legal_chunks = chunker.chunk(cleaned_text)
         emb_service = get_embedding_service()
 
-        for lc in legal_chunks:
-            embedding = emb_service.generate_embedding(lc.text)
-            emb_list = embedding.tolist()
+        texts = [lc.text for lc in legal_chunks]
+        if texts:
+            emb_matrix = emb_service.generate_embeddings_batch(texts, batch_size=24)
+        else:
+            emb_matrix = np.array([])
+
+        for idx, lc in enumerate(legal_chunks):
+            if len(emb_matrix) > idx:
+                emb_list = np.asarray(emb_matrix[idx], dtype=np.float32).flatten().tolist()
+            else:
+                emb_list = emb_service.generate_embedding(lc.text).tolist()
 
             db_chunk = DocumentChunk(
                 document_id=document.id,
@@ -365,66 +375,72 @@ def run_ingestion_pipeline(
         result["stages_failed"].append(f"elasticsearch: {e}")
         logger.warning(f"Elasticsearch indexing failed: {e}")
 
-    # ── 14. LLM summarization  (fixes Issue #9/#10 – BART stub never replaced) ─
-    try:
-        from app.services.llm_generation_service import get_llm_service
-        from app.models.document_model import LegalDocument
+    # ── 14–16. LLM summaries + constitutional RAG + plain language (slow; optional skip) ─
+    if INGESTION_SKIP_POST_CHUNK_LLM:
+        result["warnings"].append(
+            "INGESTION_SKIP_POST_CHUNK_LLM=1: skipped on-upload LLM summaries, constitutional RAG, and plain-language pass."
+        )
+    else:
+        # ── 14. LLM summarization  (fixes Issue #9/#10 – BART stub never replaced) ─
+        try:
+            from app.services.llm_generation_service import get_llm_service
+            from app.models.document_model import LegalDocument
 
-        if chunks_for_rag:
-            llm = get_llm_service()
-            meta = {
-                "court": document.court or "Unknown",
-                "year": document.year or "Unknown",
-                "case_name": file_name,
-            }
-            exec_summary = llm.generate_executive_summary(chunks_for_rag, meta)
-            detailed_summary = llm.generate_detailed_summary(chunks_for_rag, meta)
-            # DB columns are TEXT; store string (serialize dict if needed)
-            exec_val = exec_summary if isinstance(exec_summary, str) else str(exec_summary)
-            det_val = detailed_summary if isinstance(detailed_summary, str) else (
-                json.dumps(detailed_summary) if isinstance(detailed_summary, dict) else str(detailed_summary)
-            )
+            if chunks_for_rag:
+                llm = get_llm_service()
+                meta = {
+                    "court": document.court or "Unknown",
+                    "year": document.year or "Unknown",
+                    "case_name": file_name,
+                }
+                exec_summary = llm.generate_executive_summary(chunks_for_rag, meta)
+                detailed_summary = llm.generate_detailed_summary(chunks_for_rag, meta)
+                # DB columns are TEXT; store string (serialize dict if needed)
+                exec_val = exec_summary if isinstance(exec_summary, str) else str(exec_summary)
+                det_val = detailed_summary if isinstance(detailed_summary, str) else (
+                    json.dumps(detailed_summary) if isinstance(detailed_summary, dict) else str(detailed_summary)
+                )
 
-            # Save to DB
-            db.query(LegalDocument).filter(
-                LegalDocument.id == document.id
-            ).update({
-                "executive_summary": exec_val,
-                "detailed_summary": det_val,
-            })
-            db.commit()
+                # Save to DB
+                db.query(LegalDocument).filter(
+                    LegalDocument.id == document.id
+                ).update({
+                    "executive_summary": exec_val,
+                    "detailed_summary": det_val,
+                })
+                db.commit()
 
-            result["executive_summary"] = exec_summary
-            result["detailed_summary"] = detailed_summary
-            result["stages_completed"].append("llm_summarization")
-        else:
-            result["warnings"].append("No chunks available for LLM summarization.")
-    except Exception as e:
-        result["stages_failed"].append(f"llm_summarization: {e}")
-        logger.warning(f"LLM summarization failed: {e}")
+                result["executive_summary"] = exec_summary
+                result["detailed_summary"] = detailed_summary
+                result["stages_completed"].append("llm_summarization")
+            else:
+                result["warnings"].append("No chunks available for LLM summarization.")
+        except Exception as e:
+            result["stages_failed"].append(f"llm_summarization: {e}")
+            logger.warning(f"LLM summarization failed: {e}")
 
-    # ── 15. Constitutional RAG analysis  (fixes Issue #6) ─────────────────────
-    try:
-        from app.services.constitutional_rag_module import get_constitutional_rag
-        if chunks_for_rag:
-            const_rag = get_constitutional_rag()
-            const_matches = const_rag.analyse_case_chunks(chunks_for_rag, top_k_per_chunk=3)
-            result["constitutional_analysis"] = const_matches
-            result["stages_completed"].append("constitutional_rag")
-    except Exception as e:
-        result["stages_failed"].append(f"constitutional_rag: {e}")
-        logger.warning(f"Constitutional RAG analysis failed: {e}")
+        # ── 15. Constitutional RAG analysis  (fixes Issue #6) ─────────────────────
+        try:
+            from app.services.constitutional_rag_module import get_constitutional_rag
+            if chunks_for_rag:
+                const_rag = get_constitutional_rag()
+                const_matches = const_rag.analyse_case_chunks(chunks_for_rag, top_k_per_chunk=3)
+                result["constitutional_analysis"] = const_matches
+                result["stages_completed"].append("constitutional_rag")
+        except Exception as e:
+            result["stages_failed"].append(f"constitutional_rag: {e}")
+            logger.warning(f"Constitutional RAG analysis failed: {e}")
 
-    # ── 16. Plain language conversion ─────────────────────────────────────────
-    try:
-        from app.services.plain_language_converter import PlainLanguageConverter
-        if result.get("executive_summary"):
-            converter = PlainLanguageConverter()
-            plain = converter.convert_to_plain_language(result["executive_summary"])
-            result["plain_executive_summary"] = plain["plain_text"]
-            result["stages_completed"].append("plain_language")
-    except Exception as e:
-        result["stages_failed"].append(f"plain_language: {e}")
+        # ── 16. Plain language conversion ─────────────────────────────────────────
+        try:
+            from app.services.plain_language_converter import PlainLanguageConverter
+            if result.get("executive_summary"):
+                converter = PlainLanguageConverter()
+                plain = converter.convert_to_plain_language(result["executive_summary"])
+                result["plain_executive_summary"] = plain["plain_text"]
+                result["stages_completed"].append("plain_language")
+        except Exception as e:
+            result["stages_failed"].append(f"plain_language: {e}")
 
     # ── Summary ────────────────────────────────────────────────────────────────
     logger.info(

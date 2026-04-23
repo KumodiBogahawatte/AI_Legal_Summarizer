@@ -9,67 +9,6 @@ from ..services.sri_lanka_legal_engine import SriLankaLegalEngine
 from ..services.document_structure_service import analyze_document_structure, extract_section
 from ..utils.sri_lanka_legal_utils import GLOSSARY_SI_EN_TA
 
-# region agent log
-import json as _agent_json  # agent log
-import time as _agent_time  # agent log
-from pathlib import Path as _agent_Path  # agent log
-
-
-def _agent_debug_log(*, hypothesis_id: str, location: str, message: str, data: dict | None = None, run_id: str = "detailed") -> None:
-    """
-    Debug-mode NDJSON logger for this route file only.
-    Writes to repo-root/debug-044814.log. Never raises.
-    """
-    try:
-        repo_root = _agent_Path(__file__).resolve().parents[3]
-        log_path = repo_root / "debug-044814.log"
-        payload = {
-            "sessionId": "044814",
-            "runId": run_id,
-            "hypothesisId": hypothesis_id,
-            "location": location,
-            "message": message,
-            "data": data or {},
-            "timestamp": int(_agent_time.time() * 1000),
-        }
-        with open(log_path, "a", encoding="utf-8") as f:
-            f.write(_agent_json.dumps(payload, ensure_ascii=False) + "\n")
-    except Exception:
-        return
-# endregion
-
-# region agent log 424ab4
-import json as _agent_json_424ab4  # agent log
-import time as _agent_time_424ab4  # agent log
-from pathlib import Path as _agent_Path_424ab4  # agent log
-
-
-def _agent_debug_log_424ab4(
-    *,
-    hypothesis_id: str,
-    location: str,
-    message: str,
-    data: dict | None = None,
-    run_id: str = "run1",
-) -> None:
-    """Debug logger for session 424ab4 (writes NDJSON to debug-424ab4.log)."""
-    try:
-        repo_root = _agent_Path_424ab4(__file__).resolve().parents[3]
-        log_path = repo_root / "debug-424ab4.log"
-        payload = {
-            "sessionId": "424ab4",
-            "runId": run_id,
-            "hypothesisId": hypothesis_id,
-            "location": location,
-            "message": message,
-            "data": data or {},
-            "timestamp": int(_agent_time_424ab4.time() * 1000),
-        }
-        with open(log_path, "a", encoding="utf-8") as f:
-            f.write(_agent_json_424ab4.dumps(payload, ensure_ascii=False) + "\n")
-    except Exception:
-        return
-# endregion
 # NO PREFIX - let main.py handle the /api/analysis prefix
 router = APIRouter(prefix="", tags=["Analysis & Summaries"])
 
@@ -877,25 +816,10 @@ def generate_multi_level_summary(
         # Get document
         doc = db.query(LegalDocument).filter_by(id=document_id).first()
         if not doc:
-            _agent_debug_log_424ab4(
-                hypothesis_id="H1",
-                location="summary_routes.py:generate_multi_level_summary:no_doc",
-                message="Document not found for multi-level summary",
-                data={"document_id": document_id},
-            )
             raise HTTPException(404, "Document not found")
         
         text = doc.cleaned_text or doc.raw_text
         if not text:
-            _agent_debug_log_424ab4(
-                hypothesis_id="H1",
-                location="summary_routes.py:generate_multi_level_summary:no_text",
-                message="Document has no text content for multi-level summary",
-                data={
-                    "document_id": document_id,
-                    "file_name": getattr(doc, "file_name", None),
-                },
-            )
             raise HTTPException(400, "Document has no text content")
         if len(text.strip()) < 200:
             raise HTTPException(
@@ -903,28 +827,6 @@ def generate_multi_level_summary(
                 "Document has too little text for a reliable summary. "
                 "The PDF may be image-only or poorly extracted. Try re-uploading a text-based PDF or ensure OCR is enabled."
             )
-
-        _agent_debug_log(
-            hypothesis_id="ML1",
-            location="summary_routes.py:generate_multi_level_summary:entry",
-            message="Multi-level summary request received",
-            data={
-                "document_id": document_id,
-                "text_length": len(text),
-                "include_plain_language": include_plain_language,
-            },
-        )
-        
-        _agent_debug_log_424ab4(
-            hypothesis_id="H2",
-            location="summary_routes.py:generate_multi_level_summary:entry_424ab4",
-            message="Multi-level summary request (424ab4)",
-            data={
-                "document_id": document_id,
-                "file_name": getattr(doc, "file_name", None),
-                "text_length": len(text),
-            },
-        )
 
         # Try to get structured content (from document structure classification)
         structured_content = None
@@ -939,17 +841,6 @@ def generate_multi_level_summary(
         except Exception as e:
             print(f"Could not get structured content: {e}")
 
-        _agent_debug_log(
-            hypothesis_id="ML2",
-            location="summary_routes.py:generate_multi_level_summary:structure",
-            message="Structure analysis for multi-level summary",
-            data={
-                "document_id": document_id,
-                "has_structured_content": bool(structured_content),
-                "structured_sections": sorted(list(structured_content.keys())) if structured_content else [],
-            },
-        )
-        
         # Generate summaries
         from ..services.llm_generation_service import get_llm_service
         llm = get_llm_service()
@@ -965,18 +856,6 @@ def generate_multi_level_summary(
             # This calls the LLM, populates the structured JSON, and catches errors
             master = llm.generate_full_analysis(document_id, text, metadata)
 
-            _agent_debug_log_424ab4(
-                hypothesis_id="H3",
-                location="summary_routes.py:generate_multi_level_summary:llm_result_424ab4",
-                message="LLM full analysis completed (424ab4)",
-                data={
-                    "document_id": document_id,
-                    "llm_mode": getattr(llm, "_mode", None),
-                    "master_source": master.get("_source"),
-                    "has_executive_summary": bool(str(master.get("executive_summary", "")).strip()),
-                },
-            )
-            
             if master.get("_source") not in ("regex", "regex_fallback"):
                 summary_source = master.get("_source") or "llm"
                 from ..services.advanced_summarizer import AdvancedLegalSummarizer
@@ -1058,22 +937,6 @@ def generate_multi_level_summary(
                     "document_stats": {"sections_available": list(section_specific_raw.keys())}
                 }
 
-                _agent_debug_log(
-                    hypothesis_id="ML3",
-                    location="summary_routes.py:generate_multi_level_summary:llm",
-                    message="Multi-level summary generated via LLM full analysis",
-                    data={
-                        "document_id": document_id,
-                        "llm_mode": getattr(llm, "_mode", None),
-                        "master_source": master.get("_source"),
-                        "exec_word_count": summaries["executive"]["word_count"],
-                        "detailed_word_count": summaries["detailed"]["word_count"],
-                        "has_detailed_text": bool(detailed_text.strip()),
-                        "detailed_source": detailed_source,
-                        "section_specific_count": len(summaries["section_specific"] or {}),
-                        "detailed_keys": sorted(list((detailed_dict or {}).keys())),
-                    },
-                )
             else:
                 # LLM failed (429/parse) or regex_fallback: use extractive summaries but prefer BART executive from master
                 from ..services.advanced_summarizer import AdvancedLegalSummarizer
@@ -1114,39 +977,6 @@ def generate_multi_level_summary(
             from ..services.advanced_summarizer import AdvancedLegalSummarizer
             summarizer = AdvancedLegalSummarizer()
             summaries = summarizer.generate_all_summaries(text, structured_content)
-
-        if summaries:
-            detailed = summaries.get("detailed") or {}
-            _agent_debug_log(
-                hypothesis_id="ML4",
-                location="summary_routes.py:generate_multi_level_summary:final",
-                message="Multi-level summary ready for response",
-                data={
-                    "document_id": document_id,
-                    "has_executive": bool((summaries.get("executive") or {}).get("summary")),
-                    "has_detailed": bool(detailed.get("summary")),
-                    "detailed_word_count": detailed.get("word_count"),
-                    "has_section_specific": bool(summaries.get("section_specific")),
-                },
-            )
-        exec_sum = (summaries.get("executive") or {}).get("summary") or ""
-        detailed_sum = (summaries.get("detailed") or {}).get("summary") or ""
-        _agent_debug_log_424ab4(
-            hypothesis_id="H4",
-            location="summary_routes.py:generate_multi_level_summary:final_424ab4",
-            message="Multi-level summaries ready for response (424ab4)",
-            data={
-                "document_id": document_id,
-                "summary_source": summary_source,
-                "structured_sections_count": len(structured_content or {}),
-                "executive_word_count": len(exec_sum.split()),
-                "detailed_word_count": len(detailed_sum.split()),
-                "executive_preview": (exec_sum[:80] + "…") if len(exec_sum) > 80 else exec_sum,
-                "has_executive": bool(exec_sum),
-                "has_detailed": bool(detailed_sum),
-                "has_section_specific": bool(summaries.get("section_specific")),
-            },
-        )
 
         # Add plain language versions if requested
         if include_plain_language:
@@ -1226,16 +1056,6 @@ def generate_section_wise_summary(document_id: int, db: Session = Depends(get_db
         text = doc.cleaned_text or doc.raw_text
         if not text:
             raise HTTPException(400, "Document has no text content")
-
-        _agent_debug_log(
-            hypothesis_id="SW1",
-            location="summary_routes.py:generate_section_wise_summary:entry",
-            message="Section-wise summary request received",
-            data={
-                "document_id": document_id,
-                "text_length": len(text),
-            },
-        )
 
         from ..services.llm_generation_service import get_llm_service
         llm = get_llm_service()
@@ -1354,22 +1174,6 @@ def generate_section_wise_summary(document_id: int, db: Session = Depends(get_db
                 "rule_of_law": rule_of_law,
                 "key_takeaways": key_takeaways_list,
             }
-
-        _agent_debug_log(
-            hypothesis_id="SW2",
-            location="summary_routes.py:generate_section_wise_summary:final",
-            message="Section-wise summary generated",
-            data={
-                "document_id": document_id,
-                "headings_present": sorted(list(section_wise.keys())),
-                "has_not_mentioned": any(
-                    v == "Not mentioned in the case."
-                    for k, v in section_wise.items()
-                    if k != "key_takeaways"
-                ),
-                "key_takeaways_count": len(section_wise.get("key_takeaways", [])),
-            },
-        )
 
         return {
             "document_id": document_id,
@@ -1612,20 +1416,6 @@ def generate_detailed_summary(document_id: int, db: Session = Depends(get_db)):
                     word_count = int(summary_fallback.get("word_count") or 0)
                     source = "extractive_fallback"
 
-                _agent_debug_log(
-                    hypothesis_id="DS2",
-                    location="summary_routes.py:generate_detailed_summary:llm",
-                    message="Detailed summary generated via LLM/full pipeline",
-                    data={
-                        "document_id": document_id,
-                        "llm_mode": getattr(llm, "_mode", None),
-                        "master_source": master.get("_source"),
-                        "word_count": word_count,
-                        "has_summary_text": bool(formatted.strip()),
-                        "source": source,
-                        "detailed_keys": sorted(list((detailed_dict or {}).keys())),
-                    },
-                )
                 return {
                     "document_id": document_id,
                     "file_name": doc.file_name,
@@ -1721,16 +1511,29 @@ def get_similar_cases(
         query_text = (head + " " + tail).strip()
 
         # ── Use LegalDatabaseContextService (corpus-only, never user-uploaded docs) ──
-        from ..services.legal_database_context_service import get_legal_db_context
+        from ..services.legal_database_context_service import (
+            get_legal_db_context,
+            COMBINED_CASES_PATH,
+        )
+        from ..utils.corpus_drive_map import (
+            drive_meta_resolve,
+            corpus_drive_map_present,
+            iter_drive_corpus_pdf_entries,
+        )
         import re
 
         db_ctx = get_legal_db_context()
         all_cases = db_ctx._cases  # list of case dicts from combined_legal_cases.json
+        corpus_json_found = COMBINED_CASES_PATH.is_file()
+        name_tokens = db_ctx.legal_filename_tokens(doc.file_name or "")
 
         # Score each corpus case against the uploaded document
         scored = []
         for case in all_cases:
-            score = db_ctx._score_case_relevance(case, query_text)
+            primary = db_ctx._score_case_relevance(case, query_text)
+            fb = db_ctx._fallback_lexical_overlap(case, query_text)
+            name_h = db_ctx._filename_token_overlap_score(case, name_tokens)
+            score = max(primary, fb, name_h)
             if score > 0:
                 scored.append((score, case))
 
@@ -1739,13 +1542,16 @@ def get_similar_cases(
 
         # Normalize scores to 0-100 range
         max_score = scored[0][0] if scored else 1.0
-        min_sim_raw = min_similarity * max_score  # convert fraction threshold to raw score
 
-        # Normalize file name for "same document" check (strip .pdf, lowercase)
+        # Normalize file name for "same document" check (strip trailing .pdf variants, collapse dots)
         def _norm_fname(name):
             if not name:
                 return ""
-            return re.sub(r"\.pdf$", "", name.strip(), flags=re.IGNORECASE).replace(".pdf", "").strip().lower()
+            s = name.strip().lower()
+            while s.endswith(".pdf"):
+                s = s[:-4]
+            s = re.sub(r"\.+", ".", s).strip(". ")
+            return s
 
         source_norm = _norm_fname(doc.file_name or "")
 
@@ -1753,7 +1559,8 @@ def get_similar_cases(
         results = []
         seen_keys = set()
         for raw_score, case in scored[:top_k * 5]:  # over-fetch for filtering/dedup
-            if raw_score < min_sim_raw * 0.1:  # very permissive — let top_k govern
+            # Do NOT gate on min_sim_raw * max_score: one outlier score makes the floor huge and drops every other row.
+            if raw_score <= 0:
                 continue
 
             file_name = case.get("file_name", "Unknown")
@@ -1785,7 +1592,8 @@ def get_similar_cases(
                 continue
             seen_keys.add(file_name.strip().lower())
 
-            results.append({
+            drive_meta = drive_meta_resolve(file_name)
+            row = {
                 "document_id": -1,         # corpus cases have no DB id
                 "file_name":   file_name,
                 "title":       case_name,
@@ -1798,10 +1606,82 @@ def get_similar_cases(
                 "court_weight": 100.0 if court in ("Supreme Court", "Privy Council") else 70.0,
                 "recency":     None,
                 "source":      "NLR/SLR Corpus Database",
-            })
+            }
+            if drive_meta:
+                row["drive_file_id"] = drive_meta.get("file_id") or drive_meta.get("id")
+                row["drive_view_url"] = drive_meta.get("view_url")
+            results.append(row)
 
             if len(results) >= top_k:
                 break
+
+        # ── Fallback: corpus PDFs live only on Google Drive (no combined_legal_cases.json) ──
+        drive_map_present = corpus_drive_map_present()
+        drive_catalog: list = []
+        drive_fallback_used = False
+        if drive_map_present:
+            drive_catalog = iter_drive_corpus_pdf_entries()
+        if len(results) < top_k and drive_map_present and drive_catalog:
+            drive_scored = []
+            for ent in drive_catalog:
+                fn = ent.get("file_name") or ""
+                blob = (fn.replace("_", " ").replace("-", " ")).lower()
+                pseudo = {"file_name": fn, "cleaned_text": blob, "raw_text": blob}
+                sc = max(
+                    db_ctx._score_case_relevance(pseudo, query_text),
+                    db_ctx._fallback_lexical_overlap(pseudo, query_text),
+                    db_ctx._filename_token_overlap_score(pseudo, name_tokens),
+                )
+                if sc > 0:
+                    drive_scored.append((sc, ent))
+            drive_scored.sort(key=lambda x: x[0], reverse=True)
+            if drive_scored:
+                drive_fallback_used = True
+                max_d = drive_scored[0][0] if drive_scored else 1.0
+                for sc, ent in drive_scored:
+                    if len(results) >= top_k:
+                        break
+                    fn = ent.get("file_name", "")
+                    if not fn or _norm_fname(fn) == source_norm:
+                        continue
+                    kl = fn.strip().lower()
+                    if kl in seen_keys:
+                        continue
+                    seen_keys.add(kl)
+                    rel = ent.get("rel_path") or ""
+                    year_m2 = re.search(r"/(\d{4})/", rel)
+                    year2 = int(year_m2.group(1)) if year_m2 else None
+                    title = fn.replace("_", " ")
+                    sim2 = round((sc / max_d) * 100, 1) if max_d > 0 else 0.0
+                    dm = ent.get("drive_meta") or {}
+                    row = {
+                        "document_id": -1,
+                        "file_name": fn,
+                        "title": title,
+                        "citation": None,
+                        "court": "Supreme Court",
+                        "year": year2,
+                        "similarity_score": sim2,
+                        "weighted_score": sim2,
+                        "binding": True,
+                        "court_weight": 100.0,
+                        "recency": None,
+                        "source": "NLR/SLR corpus (Google Drive index, filename match)",
+                    }
+                    fid = dm.get("file_id") or dm.get("id")
+                    if fid:
+                        row["drive_file_id"] = fid
+                    if dm.get("view_url"):
+                        row["drive_view_url"] = dm.get("view_url")
+                    elif fid:
+                        row["drive_view_url"] = f"https://drive.google.com/file/d/{fid}/view"
+                    results.append(row)
+
+        src_label = "Official NLR/SLR Corpus Database (combined_legal_cases.json)"
+        if drive_fallback_used and not all_cases:
+            src_label = "NLR/SLR corpus via Google Drive map (filename / keyword match; deploy combined_legal_cases.json for full-text ranking)"
+        elif drive_fallback_used:
+            src_label = "NLR/SLR Corpus (combined JSON + Google Drive supplement)"
 
         return {
             'document_id': document_id,
@@ -1814,7 +1694,12 @@ def get_similar_cases(
             },
             'similar_cases_count': len(results),
             'similar_cases': results,
-            'source': 'Official NLR/SLR Corpus Database (combined_legal_cases.json)',
+            'source': src_label,
+            'corpus_json_found': corpus_json_found,
+            'corpus_index_size': len(all_cases),
+            'corpus_drive_map_present': drive_map_present,
+            'corpus_drive_catalog_size': len(drive_catalog),
+            'corpus_drive_fallback_used': drive_fallback_used,
         }
 
     except HTTPException:
@@ -1996,6 +1881,7 @@ def get_corpus_case(file_name: str):
     """
     try:
         from ..services.legal_database_context_service import get_legal_db_context
+        from ..utils.corpus_drive_map import drive_meta_resolve
         import re
 
         db_ctx = get_legal_db_context()
@@ -2008,6 +1894,32 @@ def get_corpus_case(file_name: str):
 
         match = next((c for c in db_ctx._cases if _matches(c)), None)
         if not match:
+            dm = drive_meta_resolve(file_name or "")
+            if dm:
+                canonical_name = _normalize_corpus_filename(file_name) or file_name
+                stem = (canonical_name.rsplit(".pdf", 1)[0] if canonical_name.lower().endswith(".pdf") else canonical_name).replace("_", " ")
+                out = {
+                    "file_name": canonical_name,
+                    "case_name": stem,
+                    "citation": None,
+                    "court": "Supreme Court",
+                    "year": None,
+                    "source": "Google Drive corpus (full text not on server)",
+                    "text": "",
+                    "text_length": 0,
+                    "drive_only": True,
+                    "notice": (
+                        "Full judgment text is not in combined_legal_cases.json on this server. "
+                        "Use Open PDF / Google Drive to read or download the judgment."
+                    ),
+                }
+                year_m = re.search(r"\b(19[0-9]{2}|20[0-2][0-9])\b", canonical_name)
+                if year_m:
+                    out["year"] = int(year_m.group(1))
+                out["drive_file_id"] = dm.get("file_id") or dm.get("id")
+                out["drive_view_url"] = dm.get("view_url")
+                out["drive_download_url"] = dm.get("download_url")
+                return out
             raise HTTPException(404, f"Corpus case '{file_name}' not found in NLR/SLR database")
 
         full_text = (match.get("cleaned_text") or match.get("raw_text") or "")
@@ -2028,13 +1940,19 @@ def get_corpus_case(file_name: str):
 
         # Return canonical file_name from corpus so frontend/PDF link use same key (e.g. single .pdf)
         canonical_name = match.get("file_name") or _normalize_corpus_filename(file_name) or file_name
-        return {
+        drive_meta = drive_meta_resolve(canonical_name)
+        out = {
             "file_name": canonical_name, "case_name": case_name,
             "citation": citation, "court": court, "year": year,
             "source": "NLR/SLR Corpus Database",
             "text": full_text[:50000],
             "text_length": len(full_text),
         }
+        if drive_meta:
+            out["drive_file_id"] = drive_meta.get("file_id") or drive_meta.get("id")
+            out["drive_view_url"] = drive_meta.get("view_url")
+            out["drive_download_url"] = drive_meta.get("download_url")
+        return out
     except HTTPException:
         raise
     except Exception as e:

@@ -4,12 +4,12 @@ Build combined_legal_cases.json from raw_documents (NLR/SLR PDFs).
 Easiest & fastest with 12k+ PDFs: use a subset + parallel workers.
 
   python backend/scripts/build_combined_corpus_from_raw.py
-  python backend/scripts/build_combined_corpus_from_raw.py --max-files 5000 --workers 6
+  python backend/scripts/build_combined_corpus_from_raw.py --max-files 800 --workers 6
 
 Options:
   --raw-dir     Path to raw_documents
   --out         Output JSON path
-  --max-files   Max PDFs (default 5000 = fast; use 5000+ for more coverage)
+  --max-files   Max PDFs to include (default 5000). You do NOT need your full corpus: use e.g. 500–2000 for dev or smaller hosts.
   --max-chars   Chars per case (default 8000; enough for relevance)
   --workers     Parallel workers (default 6; set to CPU count - 1 for max speed)
 """
@@ -28,7 +28,10 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 BACKEND_DIR = SCRIPT_DIR.parent
 PROJECT_ROOT = BACKEND_DIR.parent
 
-DEFAULT_RAW = PROJECT_ROOT / "raw_documents"
+# Prefer data/raw_documents (same as app.config RAW_DIR / bulk_ingest_corpus); fall back to repo-root raw_documents.
+_data_raw = PROJECT_ROOT / "data" / "raw_documents"
+_root_raw = PROJECT_ROOT / "raw_documents"
+DEFAULT_RAW = _data_raw if _data_raw.is_dir() else _root_raw
 DEFAULT_OUT = PROJECT_ROOT / "data" / "processed" / "combined_legal_cases.json"
 
 # Min text length to keep a case
@@ -97,7 +100,12 @@ def main():
     ap = argparse.ArgumentParser(description="Build combined_legal_cases.json from raw_documents")
     ap.add_argument("--raw-dir", type=Path, default=DEFAULT_RAW, help="Path to raw_documents")
     ap.add_argument("--out", type=Path, default=DEFAULT_OUT, help="Output JSON path")
-    ap.add_argument("--max-files", type=int, default=5000, help="Max PDFs (default 5000 for speed)")
+    ap.add_argument(
+        "--max-files",
+        type=int,
+        default=5000,
+        help="Max PDFs to index (subset is fine; lower = faster build and smaller JSON)",
+    )
     ap.add_argument("--max-chars", type=int, default=8000, help="Max chars per case (default 8000)")
     ap.add_argument("--workers", type=int, default=min(6, max(1, cpu_count() - 1)), help="Parallel workers")
     args = ap.parse_args()
