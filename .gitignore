@@ -49,6 +49,7 @@ env/
 # Local directories
 Frontend-main/
 Frontend/
+data/processed/
 raw_documents/
 uploaded_docs/
 
@@ -73,6 +74,7 @@ build/
 *.db-wal
 
 # OS
+.DS_Store
 Thumbs.db
 
 # Temporary files
