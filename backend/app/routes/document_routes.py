@@ -2,10 +2,10 @@ from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, status,
 from sqlalchemy.orm import Session
 import os
 import shutil
-import json
 
 from app.db import get_db  # Use absolute import
 from app.services.document_ingestion_pipeline import run_ingestion_pipeline
+from app.utils.corpus_drive_map import resolve_drive_pdf_url
 
 
 router = APIRouter(prefix="/documents", tags=["Documents"])
@@ -17,14 +17,6 @@ async def options_upload_sri_lanka():
 
 UPLOAD_DIR = "uploaded_docs"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
-
-# Load Google Drive PDF mapping once at startup
-GDRIVE_PDF_MAP_PATH = os.path.join(os.path.dirname(__file__), '../../../data/gdrive_pdf_urls_recursive.json')
-if os.path.exists(GDRIVE_PDF_MAP_PATH):
-    with open(GDRIVE_PDF_MAP_PATH, encoding='utf-8') as f:
-        GDRIVE_PDF_URLS = json.load(f)
-else:
-    GDRIVE_PDF_URLS = {}
 
 @router.post("/upload-sri-lanka")
 async def upload_sri_lanka_document(
@@ -125,9 +117,13 @@ async def upload_sri_lanka_document(
 @router.get("/past-case-pdf")
 def get_past_case_pdf(path: str):
     """
-    Get the Google Drive direct link for a past case PDF by relative path (e.g., 'NLR_All_Volumes/Case1.pdf').
+    Google Drive URL for a corpus PDF. Accepts basename (e.g. Case.pdf) or full relative path
+    as produced by list_gdrive_pdfs_recursive.py. Uses data/corpus_google_drive_map.json when present.
     """
-    url = GDRIVE_PDF_URLS.get(path)
+    url = resolve_drive_pdf_url(path)
     if not url:
-        raise HTTPException(status_code=404, detail="PDF not found")
+        raise HTTPException(
+            status_code=404,
+            detail="PDF not found in Drive map. Run backend/scripts/list_gdrive_pdfs_recursive.py and deploy data/corpus_google_drive_map.json (or legacy gdrive_pdf_urls_recursive.json).",
+        )
     return {"url": url}

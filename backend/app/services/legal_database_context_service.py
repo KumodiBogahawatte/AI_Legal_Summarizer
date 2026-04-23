@@ -54,8 +54,32 @@ class LegalDatabaseContextService:
         self._cases: List[Dict] = []
         self._constitution: Dict = {}
         self._fundamental_rights: Dict = {}
+        self._cases_mtime: float = 0.0
         self._load_all()
         LegalDatabaseContextService._loaded = True
+
+    def reload_corpus_if_changed(self) -> None:
+        """
+        Re-read combined_legal_cases.json when the file mtime changes (or was empty on first load).
+        Fixes dev/prod where the JSON is added or rebuilt while uvicorn stays running.
+        """
+        path = COMBINED_CASES_PATH
+        if not path.is_file():
+            return
+        try:
+            mtime = path.stat().st_mtime
+        except OSError:
+            return
+        if mtime == self._cases_mtime and self._cases:
+            return
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            self._cases = data.get("cases", [])
+            self._cases_mtime = mtime
+            logger.info("LegalDatabaseContextService: reloaded %d corpus cases", len(self._cases))
+        except Exception as exc:
+            logger.warning("Corpus reload failed: %s", exc)
 
     # ── Data Loading ──────────────────────────────────────────────────────────
 
@@ -68,6 +92,10 @@ class LegalDatabaseContextService:
             with open(json_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
             self._cases = data.get("cases", [])
+            try:
+                self._cases_mtime = json_path.stat().st_mtime
+            except OSError:
+                self._cases_mtime = 0.0
             logger.info(f"  ✅ Loaded {len(self._cases)} past cases from {json_path.name}")
         else:
             logger.warning(f"  ⚠️  combined_legal_cases.json not found at {COMBINED_CASES_PATH}")
@@ -144,6 +172,93 @@ class LegalDatabaseContextService:
                 score += 2.0
 
         return score + topic_boost
+
+    _LEX_GENERIC = {
+        "court", "plaintiff", "defendant", "appeal", "judgment", "case", "order", "held", "section",
+        "article", "respondent", "appellant", "learned", "counsel", "petitioner", "application",
+        "rights", "law", "evidence", "trial", "magistrate", "judge", "therefore", "however",
+        "whether", "against", "within", "under", "above", "following", "accordance",
+    }
+
+    def _fallback_lexical_overlap(self, case: Dict, query_text: str) -> float:
+        """
+        When _score_case_relevance returns 0 for everything (common for short OCR text or
+        mismatched eras), rank by overlap of 4+ letter tokens so Related Cases still surfaces
+        plausible NLR/SLR items.
+        """
+        q = (query_text or "")[:8000].lower()
+        case_text = (case.get("cleaned_text") or case.get("raw_text") or "")[:15000].lower()
+        if not q.strip() or not case_text.strip():
+            return 0.0
+        words = set(re.findall(r"\b[a-z]{4,}\b", q))
+        words -= self._LEX_GENERIC
+        if not words:
+            # Very noisy OCR / odd encodings often yield no 4+ char tokens after stopword removal.
+            words3 = set(re.findall(r"\b[a-z]{3,}\b", q))
+            words3 -= self._LEX_GENERIC
+            words3 -= self._LEX_GENERIC_3
+            if not words3:
+                return 0.0
+            hits3 = sum(1 for w in words3 if re.search(rf"\b{re.escape(w)}\b", case_text))
+            if hits3 <= 0:
+                return 0.0
+            return min(8.0, hits3 * 0.22)
+        hits = sum(1 for w in words if w in case_text)
+        if hits <= 0:
+            return 0.0
+        return min(12.0, hits * 0.35)
+
+    _LEX_GENERIC_3 = {
+        "the", "and", "for", "not", "but", "are", "was", "has", "had", "his", "her", "its",
+        "may", "can", "all", "any", "per", "one", "our", "out", "who", "how", "why", "way",
+        "two", "six", "ten", "etc", "viz", "cum",
+    }
+
+    def legal_filename_tokens(self, file_name: str) -> set[str]:
+        """
+        Party / subject hints from the PDF basename (e.g. READ-v.-SAMSUDIN → read, samsudin).
+        Used when body text scores are all zero so Related Cases still finds the indexed judgment.
+        """
+        if not file_name:
+            return set()
+        base = file_name.strip().lower()
+        while base.endswith(".pdf"):
+            base = base[:-4]
+        toks = set(re.findall(r"[a-z]{3,}", base))
+        noise = {"pdf", "nlr", "slr", "sllr", "clr", "vol", "part", "copy", "scan", "final"}
+        return {t for t in toks if t not in noise}
+
+    def _filename_token_overlap_score(self, case: Dict, name_tokens: set[str]) -> float:
+        """
+        Match basename tokens against corpus file name + head of judgment (word boundaries).
+
+        Tokens like "read" appear in almost every judgment ("we read the evidence"), so short
+        tokens only count when a distinctive token (length >= 5) also matches, or when at least
+        two short tokens match (e.g. ALI + KHAN).
+        """
+        if not name_tokens:
+            return 0.0
+        blob = " ".join(
+            [
+                (case.get("file_name") or "").lower(),
+                ((case.get("cleaned_text") or case.get("raw_text") or "")[:12000]).lower(),
+            ]
+        )
+        if not blob.strip():
+            return 0.0
+
+        def hit(tok: str) -> bool:
+            return bool(re.search(rf"\b{re.escape(tok)}\b", blob))
+
+        long_hits = sum(1 for t in name_tokens if len(t) >= 5 and hit(t))
+        short_hits = sum(1 for t in name_tokens if len(t) < 5 and hit(t))
+        if long_hits > 0:
+            hits = long_hits + short_hits
+        elif short_hits >= 2:
+            hits = short_hits
+        else:
+            return 0.0
+        return min(28.0, 4.0 + float(hits) * 6.0)
 
     def get_relevant_past_cases(self, query_text: str, top_k: int = 10) -> str:
         """
@@ -373,4 +488,5 @@ def get_legal_db_context() -> LegalDatabaseContextService:
     global _db_context_service
     if _db_context_service is None:
         _db_context_service = LegalDatabaseContextService()
+    _db_context_service.reload_corpus_if_changed()
     return _db_context_service

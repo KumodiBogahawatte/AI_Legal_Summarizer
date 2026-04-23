@@ -160,7 +160,8 @@ class EmbeddingService:
                 valid_texts,
                 batch_size=batch_size,
                 show_progress_bar=len(valid_texts) > 100,
-                convert_to_numpy=True
+                convert_to_numpy=True,
+                normalize_embeddings=True,
             )
             
             logger.info(f"Generated embeddings for {len(texts)} texts")

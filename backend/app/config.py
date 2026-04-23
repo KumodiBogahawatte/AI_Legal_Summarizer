@@ -49,3 +49,11 @@ ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30")
 # Backup settings
 BACKUP_DIR = os.getenv("BACKUP_DIR", str(PROJECT_ROOT / "backups"))
 BACKUP_RETENTION_DAYS = int(os.getenv("BACKUP_RETENTION_DAYS", "30"))
+
+# Ingestion: skip LLM summaries + constitutional RAG + plain-language on upload (saves minutes).
+# CaseAnalysis still calls /summarize/with-local-context (BART) after upload. Set to 0 for full pipeline.
+INGESTION_SKIP_POST_CHUNK_LLM = os.getenv("INGESTION_SKIP_POST_CHUNK_LLM", "0").lower() in (
+    "1",
+    "true",
+    "yes",
+)
