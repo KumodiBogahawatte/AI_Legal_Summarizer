@@ -1,8 +1,13 @@
 """
-Complete integration test - showing fundamental rights + constitutional provisions
+Integration-style check for fundamental rights + constitutional article detectors
+(sample text; does not exercise the HTTP API or database).
 """
 import sys
-sys.path.insert(0, r'e:\ai-legal-summarizer\backend')
+from pathlib import Path
+
+_backend_root = Path(__file__).resolve().parent
+if str(_backend_root) not in sys.path:
+    sys.path.insert(0, str(_backend_root))
 
 from app.services.fundamental_rights_detector import FundamentalRightsDetector
 from app.services.constitutional_article_detector import ConstitutionalArticleDetector
