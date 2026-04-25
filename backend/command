@@ -5,7 +5,7 @@ python -m uvicorn app.main:app --host 127.0.0.1 --port 8011 --reload
 
 #droplet
 cd /opt/AI_Legal_Summarizer
-git pull origin case-summarizer
+git pull origin main
 docker-compose down
 docker-compose build --no-cache backend
 docker-compose up -d

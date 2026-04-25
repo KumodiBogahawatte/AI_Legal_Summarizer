@@ -9,8 +9,16 @@ from typing import Dict, List, Any
 # CONFIGURATION
 # -----------------------------
 
-# Define data directory
-DATA_DIR = os.path.join(os.path.dirname(__file__), '../../data')
+def _resolve_data_dir() -> str:
+    """Use app.config.DATA_DIR in Docker / production; fallback for local dev."""
+    try:
+        from app.config import DATA_DIR as _cfg
+        return os.path.normpath(str(_cfg))
+    except Exception:
+        return os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data"))
+
+
+DATA_DIR = _resolve_data_dir()
 
 # -----------------------------
 # LEGAL TERMS LOADER
@@ -18,23 +26,25 @@ DATA_DIR = os.path.join(os.path.dirname(__file__), '../../data')
 
 def load_legal_terms():
     """Load legal terms from JSON file, fallback to empty dict if not found"""
+    _here = os.path.dirname(__file__)
     possible_paths = [
-        os.path.join(DATA_DIR, 'sri_lanka_legal_corpus/legal_glossary_si_en_ta.json'),
-        os.path.join(os.path.dirname(__file__), '../../frontend/src/utils/sri_lanka_legal_terms.json'),
-        os.path.join(os.path.dirname(__file__), '../../../data/sri_lanka_legal_corpus/legal_glossary_si_en_ta.json'),
-        os.path.join(os.path.dirname(__file__), '../../../frontend/src/utils/sri_lanka_legal_terms.json'),
-        os.path.join(os.getcwd(), 'data/sri_lanka_legal_corpus/legal_glossary_si_en_ta.json'),
-        os.path.join(os.getcwd(), 'frontend/src/utils/sri_lanka_legal_terms.json'),
-        'sri_lanka_legal_terms.json',
+        os.path.join(DATA_DIR, "sri_lanka_legal_corpus", "legal_glossary_si_en_ta.json"),
+        os.path.join(_here, "..", "..", "frontend", "src", "utils", "sri_lanka_legal_terms.json"),
+        os.path.join(_here, "..", "..", "..", "data", "sri_lanka_legal_corpus", "legal_glossary_si_en_ta.json"),
+        os.path.join(os.getcwd(), "data", "sri_lanka_legal_corpus", "legal_glossary_si_en_ta.json"),
+        os.path.join(os.getcwd(), "frontend", "src", "utils", "sri_lanka_legal_terms.json"),
+        "sri_lanka_legal_terms.json",
     ]
     for path in possible_paths:
+        path = os.path.normpath(path)
+        if not os.path.isfile(path):
+            continue
         try:
-            with open(path, 'r', encoding='utf-8') as f:
+            with open(path, "r", encoding="utf-8") as f:
                 print(f"Loaded legal terms from: {path}")
                 return json.load(f)
         except Exception as e:
-            print(f"Attempted legal terms path not found: {path} ({e})")
-            continue
+            print(f"Warning: could not read legal terms at {path}: {e}")
     print("Legal terms file not found. Using empty dictionary.")
     return {}
 
@@ -97,8 +107,10 @@ def load_constitutional_data():
     constitutional_data = {}
     
     try:
-        # Load enriched rights patterns
-        ENRICHED_RIGHTS_PATH = os.path.join(DATA_DIR, "enriched_fundamental_rights_patterns.json")
+        # Load enriched rights patterns (under sri_lanka_legal_corpus in repo)
+        ENRICHED_RIGHTS_PATH = os.path.join(
+            DATA_DIR, "sri_lanka_legal_corpus", "enriched_fundamental_rights_patterns.json"
+        )
         if os.path.exists(ENRICHED_RIGHTS_PATH):
             with open(ENRICHED_RIGHTS_PATH, "r", encoding="utf-8") as f:
                 constitutional_data["rights_patterns"] = json.load(f)
@@ -112,7 +124,7 @@ def load_constitutional_data():
 
     try:
         # Load constitution articles
-        ARTICLES_PATH = os.path.join(DATA_DIR, "constitution_articles.json")
+        ARTICLES_PATH = os.path.join(DATA_DIR, "sri_lanka_legal_corpus", "constitution_articles.json")
         if os.path.exists(ARTICLES_PATH):
             with open(ARTICLES_PATH, "r", encoding="utf-8") as f:
                 constitutional_data["articles"] = json.load(f)
@@ -126,7 +138,7 @@ def load_constitutional_data():
 
     try:
         # Load processed constitutions (ADDED HERE)
-        CONSTITUTION_PATH = os.path.join(DATA_DIR, "processed_constitutions.json")
+        CONSTITUTION_PATH = os.path.join(DATA_DIR, "sri_lanka_legal_corpus", "processed_constitutions.json")
         if os.path.exists(CONSTITUTION_PATH):
             with open(CONSTITUTION_PATH, "r", encoding="utf-8") as f:
                 constitutional_data["processed_constitutions"] = json.load(f)
