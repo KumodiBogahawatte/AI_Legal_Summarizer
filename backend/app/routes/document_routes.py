@@ -2,6 +2,8 @@ from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, status,
 from sqlalchemy.orm import Session
 import os
 import shutil
+import json
+import time
 from urllib.parse import quote
 
 from app.db import get_db  # Use absolute import
@@ -10,6 +12,22 @@ from app.utils.corpus_drive_map import resolve_drive_pdf_url
 
 
 router = APIRouter(prefix="/documents", tags=["Documents"])
+
+
+def _agent_debug_log(location: str, message: str, data: dict) -> None:
+    try:
+        payload = {
+            "sessionId": "ca3de5",
+            "runId": "open-pdf-pre-fix",
+            "location": location,
+            "message": message,
+            "data": data,
+            "timestamp": int(time.time() * 1000),
+        }
+        with open("debug-ca3de5.log", "a", encoding="utf-8") as f:
+            f.write(json.dumps(payload, ensure_ascii=True) + "\n")
+    except Exception:
+        pass
 
 @router.options("/upload-sri-lanka")
 async def options_upload_sri_lanka():
@@ -133,9 +151,33 @@ def get_past_case_pdf(path: str, request: Request):
     """
     normalized = _normalize_corpus_pdf_name(path)
     url = resolve_drive_pdf_url(normalized or path)
+    # region agent log
+    _agent_debug_log(
+        "backend/app/routes/document_routes.py:get_past_case_pdf:138",
+        "Resolved Drive URL for past-case-pdf",
+        {
+            "hypothesisId": "H1",
+            "input_path": path,
+            "normalized": normalized,
+            "url_found": bool(url),
+            "base_url": str(request.base_url),
+        },
+    )
+    # endregion
     if not url:
         if normalized:
             base_url = str(request.base_url).rstrip("/")
+            # region agent log
+            _agent_debug_log(
+                "backend/app/routes/document_routes.py:get_past_case_pdf:152",
+                "Drive URL missing, falling back to corpus-pdf-view",
+                {
+                    "hypothesisId": "H5",
+                    "normalized": normalized,
+                    "fallback_url": f"{base_url}/api/analysis/corpus-pdf-view?file_name={quote(normalized)}",
+                },
+            )
+            # endregion
             return {
                 "url": (
                     f"{base_url}/api/analysis/corpus-pdf-view?file_name={quote(normalized)}"
