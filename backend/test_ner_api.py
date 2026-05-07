@@ -23,7 +23,7 @@ print("-" * 70)
 
 try:
     response = requests.post(
-        "http://localhost:8000/api/analysis/extract-entities",
+        "http://localhost:8011/api/analysis/extract-entities",
         params={"text": test_text}
     )
     
@@ -50,4 +50,4 @@ try:
         
 except Exception as e:
     print(f"❌ Request failed: {e}")
-    print("\n⚠️  Make sure the FastAPI server is running on port 8000")
+    print("\n⚠️  Make sure the FastAPI server is running on port 8011")

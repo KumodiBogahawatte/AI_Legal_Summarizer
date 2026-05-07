@@ -180,11 +180,11 @@ def run_ingestion_pipeline(
         if ner_service.is_model_loaded():
             from app.models.legal_entity_model import LegalEntity
             entities = ner_service.extract_entities_list(cleaned_text)
-            for ent_text, ent_label in entities:
+            for ent in entities:
                 db.add(LegalEntity(
                     document_id=document.id,
-                    entity_text=ent_text,
-                    entity_type=ent_label,
+                    entity_text=ent["text"],
+                    entity_type=ent["label"],
                 ))
             db.commit()
             result["ner_entities"] = ner_service.extract_entities(cleaned_text)

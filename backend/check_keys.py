@@ -7,10 +7,14 @@ Usage:
 """
 
 import os
+from pathlib import Path
 from openai import OpenAI
 import dotenv
 
-dotenv.load_dotenv()  # loads backend/.env if present
+_backend = Path(__file__).resolve().parent
+_root = _backend.parent
+dotenv.load_dotenv(_root / ".env")
+dotenv.load_dotenv(_backend / ".env", override=True)
 
 raw = os.getenv("OPENAI_API_KEY", "").strip()
 keys = [k.strip() for k in raw.split(",") if k.strip()]

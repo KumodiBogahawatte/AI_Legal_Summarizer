@@ -341,9 +341,9 @@ class LegalDatabaseContextService:
 
         # Tier 1: Standard citation formats in text
         tier1_patterns = [
-            r'\(\d{4}\)\s*\d+\s+(?:SLR|NLR)\s+\d+',            # (2006) 2 SLR 45
-            r'\[\d{4}\]\s*\d+\s+(?:SLR|NLR)\s+\d+',            # [2006] 2 SLR 45
-            r'\b\d{1,3}\s+(?:NLR|SLR)\s+\d{1,4}\b',            # 45 NLR 123
+            r'\(\d{4}\)\s*\d+\s+(?:SLR|NLR|SLLR)\s+\d+',            # (2006) 2 SLR 45
+            r'\[\d{4}\]\s*\d+\s+(?:SLR|NLR|SLLR)\s+\d+',            # [2006] 2 SLR 45
+            r'\b\d{1,3}\s+(?:NLR|SLR|SLLR)\s+\d{1,4}\b',            # 45 NLR 123
         ]
         for pat in tier1_patterns:
             m = re.search(pat, search_text, re.IGNORECASE)

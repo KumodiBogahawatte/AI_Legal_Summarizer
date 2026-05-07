@@ -4,8 +4,13 @@ Supports comma-separated OPENAI_API_KEY=key1,key2,key3.
 Run: cd backend && python list_models.py
 """
 import os
+from pathlib import Path
 import dotenv
-dotenv.load_dotenv()
+
+_backend = Path(__file__).resolve().parent
+_root = _backend.parent
+dotenv.load_dotenv(_root / ".env")
+dotenv.load_dotenv(_backend / ".env", override=True)
 
 raw = (os.getenv("OPENAI_API_KEY") or "").strip()
 keys = [k.strip() for k in raw.split(",") if k.strip() and k.strip() != "your-openai-key-here"]

@@ -12,7 +12,7 @@ print("=" * 80)
 print("TESTING CONSTITUTIONAL ARTICLE DETECTOR WITH LAND CASE PDF")
 print("=" * 80)
 
-pdf_path = r'e:\ai-legal-summarizer\NLR-V-01-ALAWATUGODA-RATEMAHATMEYA-v.-KIRIWANTE.pdf'
+pdf_path = r'E:\summarizer_research\AI_Legal_Summarizer_2\raw_documents\NLR_All_Volumes all\new-law-report-volume-1\ALAWATUGODA RATEMAHATMEYA v. KIRIWANTE.pdf'
 pdf = open(pdf_path, 'rb')
 reader = PyPDF2.PdfReader(pdf)
 text = ''.join([page.extract_text() for page in reader.pages])
