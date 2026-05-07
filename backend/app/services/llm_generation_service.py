@@ -150,11 +150,32 @@ class LLMGenerationService:
         self._bart_summarizer = None  # Lazy-loaded when Gemini fails
         self._init_model()
 
+    @staticmethod
+    def _collect_gemini_api_keys() -> List[str]:
+        """
+        Keys from OPENAI_API_KEY (comma/newline separated) plus optional GEMINI_API_KEYS
+        with the same rules. Order preserved; duplicates removed.
+        """
+        chunks: List[str] = []
+        for env_name in ("OPENAI_API_KEY", "GEMINI_API_KEYS"):
+            raw = (os.getenv(env_name) or "").strip()
+            if not raw:
+                continue
+            for part in re.split(r"[\s,]+", raw):
+                k = part.strip()
+                if k and k != "your-openai-key-here":
+                    chunks.append(k)
+        seen: set[str] = set()
+        out: List[str] = []
+        for k in chunks:
+            if k not in seen:
+                seen.add(k)
+                out.append(k)
+        return out
+
     def _init_model(self):
         """Initialize the LLM — OpenAI/Gemini if key(s) present, else FLAN-T5."""
-        raw = os.getenv("OPENAI_API_KEY", "").strip()
-        # Support multiple keys: comma-separated (e.g. key1,key2,key3) for rotation on 429
-        self._api_keys = [k.strip() for k in raw.split(",") if k.strip() and k.strip() != "your-openai-key-here"]
+        self._api_keys = self._collect_gemini_api_keys()
         self._key_index = 0
 
         if self._api_keys:
@@ -227,6 +248,114 @@ class LLMGenerationService:
             logger.warning(f"Next API key failed to init: {e}")
             return False
 
+    @staticmethod
+    def _gemini_error_should_try_next_key(err_str: str) -> bool:
+        """True if another API key might succeed (quota, auth, transient)."""
+        lower = err_str.lower()
+        return (
+            "429" in err_str
+            or "quota" in lower
+            or "resource_exhausted" in lower
+            or "503" in err_str
+            or "504" in err_str
+            or "unavailable" in lower
+            or "overloaded" in lower
+            or "api_key_invalid" in lower
+            or "api key expired" in lower
+            or "invalid api key" in lower
+            or ("401" in err_str and "api" in lower)
+            or ("403" in err_str and ("forbidden" in lower or "permission" in lower or "api" in lower))
+        )
+
+    def _call_gemini_with_key_rotation(self, prompt: str, max_tokens: int) -> str:
+        """
+        Try chat completion with each configured key until one succeeds.
+        Avoids local/regex summary fallbacks while any key still has quota.
+        """
+        keys = getattr(self, "_api_keys", None) or []
+        if not keys:
+            return self._extractive_fallback(prompt)
+        last_err: Optional[BaseException] = None
+        last_err_str = ""
+        for idx, key in enumerate(keys):
+            self._key_index = idx
+            try:
+                self._openai_client = self._make_openai_client(key)
+                response = self._openai_client.chat.completions.create(
+                    model="gemini-flash-latest",
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=max_tokens,
+                    temperature=0.3,
+                )
+                return response.choices[0].message.content.strip()
+            except Exception as e:
+                last_err = e
+                last_err_str = str(e)
+                if self._gemini_error_should_try_next_key(last_err_str) and idx < len(keys) - 1:
+                    logger.warning(
+                        "Gemini request failed (key %s/%s): %s — trying next API key.",
+                        idx + 1,
+                        len(keys),
+                        last_err_str[:220],
+                    )
+                    continue
+                break
+        return self._handle_gemini_exhausted_keys(last_err, last_err_str, prompt, max_tokens)
+
+    def _handle_gemini_exhausted_keys(
+        self,
+        last_err: Optional[BaseException],
+        err_str: str,
+        prompt: str,
+        max_tokens: int,
+    ) -> str:
+        """All Gemini keys failed (or a non-rotatable error on the last key)."""
+        err_str = err_str or (str(last_err) if last_err else "")
+        is_quota = "429" in err_str or "quota" in err_str.lower() or "RESOURCE_EXHAUSTED" in err_str
+        is_invalid_key = "API key expired" in err_str or "API_KEY_INVALID" in err_str or (
+            "400" in err_str and ("invalid" in err_str.lower() or "API key" in err_str)
+        )
+        if is_quota:
+            logger.warning("LLM quota exceeded on all configured Gemini key(s).")
+        elif is_invalid_key:
+            logger.warning("All configured Gemini API keys rejected or invalid.")
+        else:
+            logger.error(f"LLM generation error after trying all keys: {last_err}")
+        with open("llm_errors.log", "a", encoding="utf-8") as f:
+            f.write(f"ERROR in _generate (Gemini): {last_err}\n")
+        if is_quota:
+            return (
+                "Constitutional analysis is temporarily unavailable due to high demand. "
+                "Please try again in a few minutes. The matched provisions and fundamental rights above are still available."
+            )
+        if is_invalid_key:
+            return (
+                "API key expired or invalid. Create a new key at Google AI Studio and set OPENAI_API_KEY "
+                "(comma-separated for multiple keys) or GEMINI_API_KEYS in backend/.env, then restart the backend. "
+                "The matched provisions and fundamental rights above are still available."
+            )
+        if self._ensure_flan_backend():
+            self._mode = "flan-t5"
+            try:
+                inputs = self._tokenizer(
+                    prompt,
+                    return_tensors="pt",
+                    max_length=512,
+                    truncation=True,
+                )
+                outputs = self._flan_model.generate(
+                    **inputs,
+                    max_new_tokens=min(max_tokens, 512),
+                    num_beams=2,
+                    early_stopping=True,
+                )
+                return self._tokenizer.decode(outputs[0], skip_special_tokens=True).strip()
+            except Exception as flan_err:
+                logger.error(f"FLAN-T5 fallback generation error: {flan_err}")
+                with open("llm_errors.log", "a", encoding="utf-8") as f:
+                    f.write(f"ERROR in FLAN-T5 fallback: {flan_err}\n")
+        return "Analysis could not be generated at this time. Please try again later."
+
     # ─── Internal Generation ──────────────────────────────────────────────────
 
     def _generate(self, prompt: str, max_tokens: int = 512) -> str:
@@ -234,15 +363,7 @@ class LLMGenerationService:
         print(f"DEBUG: _generate called with mode={self._mode}")
         try:
             if self._mode == "openai":
-                model_name = "gemini-flash-latest"
-                response = self._openai_client.chat.completions.create(
-                    model=model_name,
-                    messages=[{"role": "user", "content": prompt}],
-                    max_tokens=max_tokens,
-                    temperature=0.3,
-                )
-                result = response.choices[0].message.content.strip()
-                return result
+                return self._call_gemini_with_key_rotation(prompt, max_tokens)
             elif self._mode == "flan-t5":
                 # Use T5 model directly — truncate to 512 tokens max
                 inputs = self._tokenizer(
@@ -263,66 +384,14 @@ class LLMGenerationService:
                 # Extractive fallback — return first 150 words of the context
                 return self._extractive_fallback(prompt)
         except Exception as e:
-            err_str = str(e)
-            is_quota = "429" in err_str or "quota" in err_str.lower() or "RESOURCE_EXHAUSTED" in err_str
-            is_invalid_key = "API key expired" in err_str or "API_KEY_INVALID" in err_str or (
-                "400" in err_str and ("invalid" in err_str.lower() or "API key" in err_str)
-            )
-            if is_quota and self._mode == "openai" and self._try_next_key():
-                # Retry once with next key
-                try:
-                    response = self._openai_client.chat.completions.create(
-                        model="gemini-flash-latest",
-                        messages=[{"role": "user", "content": prompt}],
-                        max_tokens=max_tokens,
-                        temperature=0.3,
-                    )
-                    return response.choices[0].message.content.strip()
-                except Exception as retry_e:
-                    logger.warning(f"Retry with next key failed: {retry_e}")
-                    err_str = str(retry_e)
-                    is_quota = "429" in err_str or "quota" in err_str.lower()
-            if is_quota:
-                logger.warning("LLM quota exceeded (429); returning user-friendly message without FLAN fallback.")
-            elif is_invalid_key:
-                logger.warning("LLM API key expired or invalid; returning user-friendly message.")
-            else:
-                logger.error(f"LLM generation error: {e}")
+            logger.error(f"LLM generation error ({self._mode}): {e}")
             with open("llm_errors.log", "a", encoding="utf-8") as f:
                 f.write(f"ERROR in _generate: {e}\n")
-            if is_quota:
-                return (
-                    "Constitutional analysis is temporarily unavailable due to high demand. "
-                    "Please try again in a few minutes. The matched provisions and fundamental rights above are still available."
-                )
-            if is_invalid_key:
-                return (
-                    "API key expired or invalid. Create a new key at Google AI Studio and set OPENAI_API_KEY in backend/.env, then restart the backend. "
-                    "The matched provisions and fundamental rights above are still available."
-                )
-            # For other errors, try FLAN-T5 fallback only if available (avoids SentencePiece noise when not installed)
             if self._mode == "openai":
-                if self._ensure_flan_backend():
-                    self._mode = "flan-t5"
-                    try:
-                        inputs = self._tokenizer(
-                            prompt,
-                            return_tensors="pt",
-                            max_length=512,
-                            truncation=True,
-                        )
-                        outputs = self._flan_model.generate(
-                            **inputs,
-                            max_new_tokens=min(max_tokens, 512),
-                            num_beams=2,
-                            early_stopping=True,
-                        )
-                        return self._tokenizer.decode(outputs[0], skip_special_tokens=True).strip()
-                    except Exception as flan_err:
-                        logger.error(f"FLAN-T5 fallback generation error: {flan_err}")
-                        with open("llm_errors.log", "a", encoding="utf-8") as f:
-                            f.write(f"ERROR in FLAN-T5 fallback: {flan_err}\n")
-            return "Analysis could not be generated at this time. Please try again later."
+                return self._handle_gemini_exhausted_keys(e, str(e), prompt, max_tokens)
+            if self._mode == "flan-t5":
+                return "Analysis could not be generated at this time. Please try again later."
+            return self._extractive_fallback(prompt)
 
     def _extractive_fallback(self, prompt: str) -> str:
         """

@@ -1,13 +1,15 @@
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse
 from sqlalchemy.orm import Session
+import os
 import re
+from pathlib import Path
 from ..db import SessionLocal
 from ..models.document_model import LegalDocument
 from ..services.nlp_analyzer import NLPAnalyzer
 from ..services.sri_lanka_legal_engine import SriLankaLegalEngine
 from ..services.document_structure_service import analyze_document_structure, extract_section
-from ..utils.sri_lanka_legal_utils import GLOSSARY_SI_EN_TA
+from ..utils.sri_lanka_legal_utils import GLOSSARY_SI_EN_TA, extract_case_citation, extract_case_year
 
 # NO PREFIX - let main.py handle the /api/analysis prefix
 router = APIRouter(prefix="", tags=["Analysis & Summaries"])
@@ -21,62 +23,135 @@ def get_db():
         db.close()
 
 
+def _gemini_key_env_snapshot() -> dict:
+    """
+    Safe diagnostics: never exposes key material. Shows whether the running process
+    has env vars set and which .env paths the app loads (see app/config.py).
+    """
+    backend_dir = Path(__file__).resolve().parent.parent.parent
+    project_root = backend_dir.parent
+    raw_o = (os.getenv("OPENAI_API_KEY") or "").strip()
+    raw_g = (os.getenv("GEMINI_API_KEYS") or "").strip()
+    return {
+        "OPENAI_API_KEY_nonempty_in_process": bool(raw_o and raw_o != "your-openai-key-here"),
+        "GEMINI_API_KEYS_nonempty_in_process": bool(raw_g),
+        "env_files_loaded_in_order": [
+            str(project_root / ".env"),
+            str(backend_dir / ".env"),
+        ],
+        "note": "Secrets are not stored in git or returned by this API. Put keys only in .env or OS environment.",
+    }
+
+
+def _iter_gemini_api_keys():
+    """Same key list as LLMGenerationService: OPENAI_API_KEY + GEMINI_API_KEYS, comma or whitespace separated."""
+    import re as _re
+    out = []
+    for env_name in ("OPENAI_API_KEY", "GEMINI_API_KEYS"):
+        raw = (os.getenv(env_name) or "").strip()
+        if not raw:
+            continue
+        for part in _re.split(r"[\s,]+", raw):
+            k = part.strip()
+            if k and k != "your-openai-key-here":
+                out.append(k)
+    seen = set()
+    for k in out:
+        if k not in seen:
+            seen.add(k)
+            yield k
+
+
 @router.get("/llm-status")
 def get_llm_status():
     """
     Check AI/LLM service status: API key configured and quota (limit) availability.
     Returns whether the Gemini API is usable so the frontend can show limit/fallback messaging.
+    Tries each configured key until one succeeds (matches runtime rotation).
     """
-    import os
-    key = (os.getenv("OPENAI_API_KEY") or "").strip()
-    if not key or key == "your-openai-key-here":
+    keys = list(_iter_gemini_api_keys())
+    snap = _gemini_key_env_snapshot()
+    if not keys:
         return {
             "api_key_configured": False,
             "limit_status": "no_key",
-            "message": "No API key set. Set OPENAI_API_KEY in backend/.env (e.g. Gemini key) for full AI summaries.",
+            "parsed_key_count": 0,
+            "message": "No API key set. Set OPENAI_API_KEY or GEMINI_API_KEYS in project-root .env or backend/.env (comma-separated for multiple Gemini keys), then restart the backend.",
+            **snap,
         }
     try:
         from openai import OpenAI
-        client = OpenAI(
-            api_key=key,
-            base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
-        )
-        resp = client.chat.completions.create(
-            model="gemini-flash-latest",
-            messages=[{"role": "user", "content": "Reply with exactly: OK"}],
-            max_tokens=10,
-        )
-        _ = resp.choices[0].message.content
-        return {
-            "api_key_configured": True,
-            "limit_status": "ok",
-            "message": "AI service is available. Full summaries and section-by-section analysis are enabled.",
-        }
-    except Exception as e:
-        err = str(e)
-        # Check expired/invalid key first (400 + API key message)
-        if "API key expired" in err or "API_KEY_INVALID" in err or "400" in err and ("invalid" in err.lower() or "API key" in err):
+        base_url = "https://generativelanguage.googleapis.com/v1beta/openai/"
+        last_err = ""
+        for idx, key in enumerate(keys):
+            try:
+                client = OpenAI(api_key=key, base_url=base_url)
+                resp = client.chat.completions.create(
+                    model="gemini-flash-latest",
+                    messages=[{"role": "user", "content": "Reply with exactly: OK"}],
+                    max_tokens=10,
+                )
+                _ = resp.choices[0].message.content
+                msg = "AI service is available. Full summaries and section-by-section analysis are enabled."
+                if len(keys) > 1:
+                    msg += f" ({len(keys)} API keys configured; key {idx + 1} responded OK.)"
+                return {
+                    "api_key_configured": True,
+                    "limit_status": "ok",
+                    "message": msg,
+                    "keys_configured": len(keys),
+                    "parsed_key_count": len(keys),
+                    **snap,
+                }
+            except Exception as e:
+                last_err = str(e)
+                continue
+        err = last_err
+        if (
+            "API key expired" in err
+            or "API_KEY_INVALID" in err
+            or ("400" in err and ("invalid" in err.lower() or "API key" in err))
+        ):
             return {
                 "api_key_configured": True,
                 "limit_status": "invalid_key",
-                "message": "API key expired or invalid. Create a new key at Google AI Studio (aistudio.google.com) and set OPENAI_API_KEY in backend/.env, then restart the backend.",
+                "message": "All configured API keys were rejected or invalid. Create new keys at Google AI Studio (aistudio.google.com) and set OPENAI_API_KEY or GEMINI_API_KEYS in backend/.env, then restart the backend.",
+                "keys_configured": len(keys),
+                "parsed_key_count": len(keys),
+                **snap,
             }
-        if "401" in err or "403" in err or "invalid" in err.lower() or "API key" in err:
+        if "401" in err or "403" in err:
             return {
                 "api_key_configured": True,
                 "limit_status": "invalid_key",
-                "message": "API key rejected. Set a valid Gemini key in backend/.env (OPENAI_API_KEY).",
+                "message": "API key rejected. Check each key in OPENAI_API_KEY / GEMINI_API_KEYS.",
+                "keys_configured": len(keys),
+                "parsed_key_count": len(keys),
+                **snap,
             }
         if "429" in err or "quota" in err.lower() or "RESOURCE_EXHAUSTED" in err:
             return {
                 "api_key_configured": True,
                 "limit_status": "quota_exceeded",
-                "message": "API limit (quota) reached. Try again later or use another key. Summaries will use fallback until quota resets.",
+                "message": "API limit (quota) reached on every configured key. Add another key, wait for quota reset, or summaries will use fallback.",
+                "keys_configured": len(keys),
+                "parsed_key_count": len(keys),
+                **snap,
             }
         return {
             "api_key_configured": True,
             "limit_status": "error",
             "message": f"API check failed: {err[:200]}",
+            "keys_configured": len(keys),
+            "parsed_key_count": len(keys),
+            **snap,
+        }
+    except Exception as e:
+        return {
+            "api_key_configured": True,
+            "limit_status": "error",
+            "message": f"API check failed: {str(e)[:200]}",
+            **snap,
         }
 
 
@@ -1568,10 +1643,15 @@ def get_similar_cases(
             if _norm_fname(file_name) == source_norm:
                 continue
 
-            full_text = (case.get("cleaned_text") or case.get("raw_text") or "")[:4000]
+            full_text = (case.get("cleaned_text") or case.get("raw_text") or "")[:15000]
 
             case_name = db_ctx._extract_case_name_from_text(full_text) or file_name
-            citation  = db_ctx._extract_citation(full_text, file_name)
+            raw_cite = case.get("citation") or case.get("case_citation")
+            citation = raw_cite.strip() if isinstance(raw_cite, str) else ""
+            if not citation:
+                citation = db_ctx._extract_citation(full_text, file_name)
+            if not citation:
+                citation = extract_case_citation(full_text, file_name)
 
             # Infer court
             t_upper = full_text[:3000].upper()
@@ -1581,9 +1661,22 @@ def get_similar_cases(
             elif "HIGH COURT" in t_upper:        court = "High Court"
             else:                                court = "Supreme Court"
 
-            # Infer year
-            year_m = re.search(r'\b(19[0-9]{2}|20[0-2][0-9])\b', full_text[:2000])
-            year = int(year_m.group(1)) if year_m else None
+            # Prefer explicit corpus metadata, else citation-aware year from judgment head
+            year = None
+            for ykey in ("year", "case_year", "report_year"):
+                raw_y = case.get(ykey)
+                if raw_y is not None and str(raw_y).strip():
+                    try:
+                        year = int(str(raw_y).strip()[:4])
+                        if year < 1800 or year > 2035:
+                            year = None
+                        else:
+                            break
+                    except (TypeError, ValueError):
+                        year = None
+            if year is None:
+                y_ext = extract_case_year(full_text)
+                year = y_ext if y_ext is not None else None
 
             similarity_pct = round((raw_score / max_score) * 100, 1)
 
@@ -1651,14 +1744,18 @@ def get_similar_cases(
                     rel = ent.get("rel_path") or ""
                     year_m2 = re.search(r"/(\d{4})/", rel)
                     year2 = int(year_m2.group(1)) if year_m2 else None
+                    if year2 is None or year2 < 1800 or year2 > 2035:
+                        yfn = re.search(r"(19\d{2}|20\d{2})", fn)
+                        year2 = int(yfn.group(1)) if yfn else None
                     title = fn.replace("_", " ")
                     sim2 = round((sc / max_d) * 100, 1) if max_d > 0 else 0.0
                     dm = ent.get("drive_meta") or {}
+                    cite_drive = db_ctx._extract_citation("", fn) or extract_case_citation("", fn)
                     row = {
                         "document_id": -1,
                         "file_name": fn,
                         "title": title,
-                        "citation": None,
+                        "citation": cite_drive or None,
                         "court": "Supreme Court",
                         "year": year2,
                         "similarity_score": sim2,
@@ -1781,14 +1878,21 @@ def get_related_cases(
 
     # Normalize document-level embedding precedents
     for c in doc_embedding_cases:
+        cite_de = c.get("case_number") or c.get("citation")
+        y_de = c.get("year")
+        if y_de is not None and y_de != "":
+            try:
+                y_de = int(str(y_de).strip()[:4])
+            except (TypeError, ValueError):
+                y_de = None
         related_cases.append({
             "source_type": "doc_embedding",
             "document_id": c.get("document_id"),
             "file_name": c.get("file_name"),
             "case_name": c.get("title") or c.get("file_name"),
-            "citation": None,
+            "citation": cite_de,
             "court": c.get("court"),
-            "year": c.get("year"),
+            "year": y_de,
             "similarity_score": c.get("similarity_score"),
             "weighted_score": c.get("weighted_score"),
             "binding": c.get("binding"),

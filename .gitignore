@@ -81,3 +81,5 @@ Thumbs.db
 *.tmp
 temp/
 *.temp
+
+docs/
