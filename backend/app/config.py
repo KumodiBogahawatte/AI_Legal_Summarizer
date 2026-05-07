@@ -7,9 +7,10 @@ from urllib.parse import quote_plus
 BASE_DIR = Path(__file__).resolve().parent.parent  # backend/app -> backend
 PROJECT_ROOT = BASE_DIR.parent  # backend -> project root
 
-# Load env files: project root first (easy to open in IDE), then backend/.env overrides on duplicate keys.
+# Load env files without overriding process env (e.g., Docker/K8s runtime vars).
+# Runtime-provided variables must take precedence over .env defaults.
 load_dotenv(PROJECT_ROOT / ".env")
-load_dotenv(BASE_DIR / ".env", override=True)
+load_dotenv(BASE_DIR / ".env", override=False)
 
 # Database Configuration
 DATABASE_TYPE = os.getenv("DATABASE_TYPE", "postgresql")  # Default to PostgreSQL

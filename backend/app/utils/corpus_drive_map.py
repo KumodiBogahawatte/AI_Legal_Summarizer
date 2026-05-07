@@ -24,6 +24,13 @@ _LEGACY = _data_dir / "gdrive_pdf_urls_recursive.json"
 _maps: Optional[Tuple[Dict[str, str], Dict[str, Dict[str, Any]]]] = None
 
 
+def _collapse_pdf_suffix(name: str) -> str:
+    s = (name or "").strip()
+    while s.lower().endswith(".pdf.pdf"):
+        s = s[:-4]
+    return s
+
+
 def corpus_drive_map_paths() -> Tuple[Path, Path]:
     """Preferred and legacy map paths under DATA_DIR."""
     return _PREFERRED, _LEGACY
@@ -119,7 +126,7 @@ def iter_drive_corpus_pdf_entries(max_entries: int = 25000) -> List[Dict[str, An
 
 
 def _norm_rel(s: str) -> str:
-    return (s or "").strip().replace("\\", "/")
+    return _collapse_pdf_suffix((s or "").strip().replace("\\", "/"))
 
 
 def _load_maps() -> Tuple[Dict[str, str], Dict[str, Dict[str, Any]]]:
@@ -134,16 +141,30 @@ def _load_maps() -> Tuple[Dict[str, str], Dict[str, Dict[str, Any]]]:
         with open(_PREFERRED, encoding="utf-8") as f:
             data = json.load(f)
         for k, v in (data.get("by_rel_path") or {}).items():
-            key = _norm_rel(k)
+            key_raw = (k or "").strip().replace("\\", "/")
+            key = _norm_rel(key_raw)
             if isinstance(v, str) and v:
                 by_rel[key] = v
             elif isinstance(v, dict):
                 url = v.get("view_url") or v.get("download_url") or ""
                 if url:
                     by_rel[key] = url
+            # Keep a normalized alias for map rows like ".../x.pdf.pdf"
+            if key_raw and key_raw != key and key not in by_rel:
+                if isinstance(v, str) and v:
+                    by_rel[key] = v
+                elif isinstance(v, dict):
+                    url = v.get("view_url") or v.get("download_url") or ""
+                    if url:
+                        by_rel[key] = url
         for k, v in (data.get("by_file_name") or {}).items():
             if isinstance(v, dict) and k:
-                by_name[k.strip().lower()] = v
+                kk = _collapse_pdf_suffix(k.strip().lower())
+                by_name[kk] = v
+                # Also preserve original raw key if different
+                rawk = k.strip().lower()
+                if rawk != kk:
+                    by_name.setdefault(rawk, v)
 
     if _LEGACY.is_file():
         with open(_LEGACY, encoding="utf-8") as f:

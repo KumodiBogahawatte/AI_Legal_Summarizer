@@ -1,7 +1,10 @@
-from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, status, Response
+from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, status, Response, Request
 from sqlalchemy.orm import Session
 import os
 import shutil
+import json
+import time
+from urllib.parse import quote
 
 from app.db import get_db  # Use absolute import
 from app.services.document_ingestion_pipeline import run_ingestion_pipeline
@@ -10,6 +13,22 @@ from app.utils.corpus_drive_map import resolve_drive_pdf_url
 
 router = APIRouter(prefix="/documents", tags=["Documents"])
 
+
+def _agent_debug_log(location: str, message: str, data: dict) -> None:
+    try:
+        payload = {
+            "sessionId": "ca3de5",
+            "runId": "open-pdf-pre-fix",
+            "location": location,
+            "message": message,
+            "data": data,
+            "timestamp": int(time.time() * 1000),
+        }
+        with open("debug-ca3de5.log", "a", encoding="utf-8") as f:
+            f.write(json.dumps(payload, ensure_ascii=True) + "\n")
+    except Exception:
+        pass
+
 @router.options("/upload-sri-lanka")
 async def options_upload_sri_lanka():
     return Response(status_code=204)
@@ -17,6 +36,16 @@ async def options_upload_sri_lanka():
 
 UPLOAD_DIR = "uploaded_docs"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+
+def _normalize_corpus_pdf_name(file_name: str) -> str:
+    """Return a safe basename with repeated .pdf suffixes collapsed."""
+    if not file_name:
+        return ""
+    name = str(file_name).strip().replace("\\", "/").split("/")[-1]
+    while name.lower().endswith(".pdf.pdf"):
+        name = name[:-4]
+    return name
 
 @router.post("/upload-sri-lanka")
 async def upload_sri_lanka_document(
@@ -115,13 +144,53 @@ async def upload_sri_lanka_document(
         raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
 
 @router.get("/past-case-pdf")
-def get_past_case_pdf(path: str):
+def get_past_case_pdf(path: str, request: Request):
     """
     Google Drive URL for a corpus PDF. Accepts basename (e.g. Case.pdf) or full relative path
     as produced by list_gdrive_pdfs_recursive.py. Uses data/corpus_google_drive_map.json when present.
     """
-    url = resolve_drive_pdf_url(path)
+    normalized = _normalize_corpus_pdf_name(path)
+    url = resolve_drive_pdf_url(normalized or path)
+    # region agent log
+    _agent_debug_log(
+        "backend/app/routes/document_routes.py:get_past_case_pdf:138",
+        "Resolved Drive URL for past-case-pdf",
+        {
+            "hypothesisId": "H1",
+            "input_path": path,
+            "normalized": normalized,
+            "url_found": bool(url),
+            "base_url": str(request.base_url),
+        },
+    )
+    # endregion
     if not url:
+        if normalized:
+            # Only fallback to local corpus PDF URL when the file actually exists.
+            # On hosted setups where PDFs are expected from Drive, returning a local
+            # fallback URL creates a second-hop 404 (corpus-pdf-view -> not found).
+            from app.routes.summary_routes import _get_corpus_pdf_path
+
+            local_path = _get_corpus_pdf_path(normalized)
+            # region agent log
+            _agent_debug_log(
+                "backend/app/routes/document_routes.py:get_past_case_pdf:162",
+                "Drive URL missing, checked local corpus fallback availability",
+                {
+                    "hypothesisId": "H11",
+                    "normalized": normalized,
+                    "local_path_found": bool(local_path),
+                    "local_path": str(local_path) if local_path else None,
+                },
+            )
+            # endregion
+            if local_path:
+                base_url = str(request.base_url).rstrip("/")
+                return {
+                    "url": (
+                        f"{base_url}/api/analysis/corpus-pdf-view?file_name={quote(normalized)}"
+                    )
+                }
         raise HTTPException(
             status_code=404,
             detail="PDF not found in Drive map. Run backend/scripts/list_gdrive_pdfs_recursive.py and deploy data/corpus_google_drive_map.json (or legacy gdrive_pdf_urls_recursive.json).",

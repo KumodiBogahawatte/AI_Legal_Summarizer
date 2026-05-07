@@ -3,6 +3,8 @@ from fastapi.responses import FileResponse, HTMLResponse
 from sqlalchemy.orm import Session
 import os
 import re
+import json
+import time
 from pathlib import Path
 from ..db import SessionLocal
 from ..models.document_model import LegalDocument
@@ -13,6 +15,22 @@ from ..utils.sri_lanka_legal_utils import GLOSSARY_SI_EN_TA, extract_case_citati
 
 # NO PREFIX - let main.py handle the /api/analysis prefix
 router = APIRouter(prefix="", tags=["Analysis & Summaries"])
+
+
+def _agent_debug_log(location: str, message: str, data: dict) -> None:
+    try:
+        payload = {
+            "sessionId": "ca3de5",
+            "runId": "open-pdf-pre-fix",
+            "location": location,
+            "message": message,
+            "data": data,
+            "timestamp": int(time.time() * 1000),
+        }
+        with open("debug-ca3de5.log", "a", encoding="utf-8") as f:
+            f.write(json.dumps(payload, ensure_ascii=True) + "\n")
+    except Exception:
+        pass
 
 # Dependency
 def get_db():
@@ -2110,6 +2128,20 @@ def _get_corpus_pdf_path(file_name: str):
         file_name.replace(" ", "_"),
         _normalize_corpus_filename(file_name).replace(" ", "_"),
     ]
+    # region agent log
+    _agent_debug_log(
+        "backend/app/routes/summary_routes.py:_get_corpus_pdf_path:2130",
+        "Starting corpus PDF path resolution",
+        {
+            "hypothesisId": "H2",
+            "file_name": file_name,
+            "candidates": candidates,
+            "manifest_path": str(manifest_path),
+            "manifest_exists": bool(manifest_path.exists()),
+            "project_root": str(project_root),
+        },
+    )
+    # endregion
     rel_path = None
     for c in candidates:
         if not c:
@@ -2117,12 +2149,48 @@ def _get_corpus_pdf_path(file_name: str):
         rel_path = paths_map.get(c)
         if rel_path:
             break
+    # region agent log
+    _agent_debug_log(
+        "backend/app/routes/summary_routes.py:_get_corpus_pdf_path:2154",
+        "Resolved manifest relative path candidate",
+        {
+            "hypothesisId": "H3",
+            "file_name": file_name,
+            "rel_path_found": bool(rel_path),
+            "rel_path": rel_path,
+        },
+    )
+    # endregion
 
     base = os.environ.get("CORPUS_PDF_DIR")
+    manifest_base = data.get("base_dir")
+    candidate_bases = []
     if base:
-        base_path = Path(base)
-    else:
-        base_path = Path(data.get("base_dir", str(project_root / "raw_documents")))
+        candidate_bases.append(Path(base))
+    if manifest_base:
+        candidate_bases.append(Path(manifest_base))
+    candidate_bases.extend(
+        [
+            project_root / "raw_documents",
+            project_root / "data" / "raw_documents",
+            backend_dir / "raw_documents",
+        ]
+    )
+    base_path = next((p for p in candidate_bases if p.exists()), candidate_bases[0])
+    # region agent log
+    _agent_debug_log(
+        "backend/app/routes/summary_routes.py:_get_corpus_pdf_path:2169",
+        "Computed base path for corpus lookup",
+        {
+            "hypothesisId": "H2",
+            "env_corpus_pdf_dir": base,
+            "manifest_base_dir": manifest_base,
+            "base_path_candidates": [str(p) for p in candidate_bases],
+            "base_path_selected": str(base_path),
+            "base_exists": bool(base_path.exists()),
+        },
+    )
+    # endregion
 
     # 1) If manifest has a relative path, try that first
     if rel_path:
@@ -2145,6 +2213,19 @@ def _get_corpus_pdf_path(file_name: str):
         # Best-effort search; if it fails we just return None.
         pass
 
+    # region agent log
+    _agent_debug_log(
+        "backend/app/routes/summary_routes.py:_get_corpus_pdf_path:2197",
+        "Corpus PDF resolution failed after manifest and filesystem search",
+        {
+            "hypothesisId": "H4",
+            "file_name": file_name,
+            "candidates": candidates,
+            "base_path": str(base_path),
+            "base_exists": bool(base_path.exists()),
+        },
+    )
+    # endregion
     return None
 
 
