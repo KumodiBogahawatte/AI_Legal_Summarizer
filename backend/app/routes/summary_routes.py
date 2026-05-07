@@ -2163,10 +2163,20 @@ def _get_corpus_pdf_path(file_name: str):
     # endregion
 
     base = os.environ.get("CORPUS_PDF_DIR")
+    manifest_base = data.get("base_dir")
+    candidate_bases = []
     if base:
-        base_path = Path(base)
-    else:
-        base_path = Path(data.get("base_dir", str(project_root / "raw_documents")))
+        candidate_bases.append(Path(base))
+    if manifest_base:
+        candidate_bases.append(Path(manifest_base))
+    candidate_bases.extend(
+        [
+            project_root / "raw_documents",
+            project_root / "data" / "raw_documents",
+            backend_dir / "raw_documents",
+        ]
+    )
+    base_path = next((p for p in candidate_bases if p.exists()), candidate_bases[0])
     # region agent log
     _agent_debug_log(
         "backend/app/routes/summary_routes.py:_get_corpus_pdf_path:2169",
@@ -2174,7 +2184,9 @@ def _get_corpus_pdf_path(file_name: str):
         {
             "hypothesisId": "H2",
             "env_corpus_pdf_dir": base,
-            "base_path": str(base_path),
+            "manifest_base_dir": manifest_base,
+            "base_path_candidates": [str(p) for p in candidate_bases],
+            "base_path_selected": str(base_path),
             "base_exists": bool(base_path.exists()),
         },
     )

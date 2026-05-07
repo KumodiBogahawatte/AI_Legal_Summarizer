@@ -166,23 +166,31 @@ def get_past_case_pdf(path: str, request: Request):
     # endregion
     if not url:
         if normalized:
-            base_url = str(request.base_url).rstrip("/")
+            # Only fallback to local corpus PDF URL when the file actually exists.
+            # On hosted setups where PDFs are expected from Drive, returning a local
+            # fallback URL creates a second-hop 404 (corpus-pdf-view -> not found).
+            from app.routes.summary_routes import _get_corpus_pdf_path
+
+            local_path = _get_corpus_pdf_path(normalized)
             # region agent log
             _agent_debug_log(
-                "backend/app/routes/document_routes.py:get_past_case_pdf:152",
-                "Drive URL missing, falling back to corpus-pdf-view",
+                "backend/app/routes/document_routes.py:get_past_case_pdf:162",
+                "Drive URL missing, checked local corpus fallback availability",
                 {
-                    "hypothesisId": "H5",
+                    "hypothesisId": "H11",
                     "normalized": normalized,
-                    "fallback_url": f"{base_url}/api/analysis/corpus-pdf-view?file_name={quote(normalized)}",
+                    "local_path_found": bool(local_path),
+                    "local_path": str(local_path) if local_path else None,
                 },
             )
             # endregion
-            return {
-                "url": (
-                    f"{base_url}/api/analysis/corpus-pdf-view?file_name={quote(normalized)}"
-                )
-            }
+            if local_path:
+                base_url = str(request.base_url).rstrip("/")
+                return {
+                    "url": (
+                        f"{base_url}/api/analysis/corpus-pdf-view?file_name={quote(normalized)}"
+                    )
+                }
         raise HTTPException(
             status_code=404,
             detail="PDF not found in Drive map. Run backend/scripts/list_gdrive_pdfs_recursive.py and deploy data/corpus_google_drive_map.json (or legacy gdrive_pdf_urls_recursive.json).",
